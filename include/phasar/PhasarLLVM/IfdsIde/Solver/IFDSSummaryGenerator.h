@@ -14,17 +14,17 @@
  *      Author: philipp
  */
 
-#ifndef SRC_ANALYSIS_IFDS_IDE_IFDSSUMMARYGENERATOR_H_
-#define SRC_ANALYSIS_IFDS_IDE_IFDSSUMMARYGENERATOR_H_
+#ifndef PHASAR_PHASARLLVM_IFDSIDE_SOLVER_IFDSSUMMARYGENERATOR_H_
+#define PHASAR_PHASARLLVM_IFDSIDE_SOLVER_IFDSSUMMARYGENERATOR_H_
 
-#include "../../../utils/utils.h"
-#include "../../misc/SummaryStrategy.h"
-#include "../FlowFunction.h"
-#include "../ZeroValue.h"
-#include "../flow_func/GenAll.h"
-#include <iostream>
+#include <iostream> // std::cout
 #include <set>
 #include <vector>
+
+#include <phasar/PhasarLLVM/IfdsIde/FlowFunction.h>
+#include <phasar/PhasarLLVM/IfdsIde/FlowFunctions/GenAll.h>
+#include <phasar/PhasarLLVM/IfdsIde/LLVMZeroValue.h>
+#include <phasar/PhasarLLVM/Utils/SummaryStrategy.h>
 
 namespace psr {
 
@@ -65,9 +65,11 @@ public:
   IFDSSummaryGenerator(M Function, I icfg, SummaryGenerationStrategy Strategy)
       : toSummarize(Function), icfg(icfg), CTXStrategy(Strategy) {}
   virtual ~IFDSSummaryGenerator() = default;
-  virtual std::set<pair<std::vector<bool>, shared_ptr<FlowFunction<D>>>>
+  virtual std::set<
+      std::pair<std::vector<bool>, std::shared_ptr<FlowFunction<D>>>>
   generateSummaryFlowFunction() {
-    std::set<pair<std::vector<bool>, shared_ptr<FlowFunction<D>>>> summary;
+    std::set<std::pair<std::vector<bool>, std::shared_ptr<FlowFunction<D>>>>
+        summary;
     std::vector<D> inputs = getInputs();
     std::set<D> inputset;
     inputset.insert(inputs.begin(), inputs.end());
@@ -92,8 +94,8 @@ public:
       break;
     }
     for (auto subset : InputCombinations) {
-      cout << "Generate summary for specific context: "
-           << generateBitPattern(inputs, subset) << "\n";
+      std::cout << "Generate summary for specific context: "
+                << generateBitPattern(inputs, subset) << "\n";
       CTXFunctionProblem functionProblem(
           *icfg.getStartPointsOf(toSummarize).begin(), subset, icfg);
       ConcreteSolver solver(functionProblem, true);
@@ -105,9 +107,9 @@ public:
       for (auto fact : solver.resultsAt(*LastInsts.begin())) {
         results.insert(fact.first);
       }
-      summary.insert(
-          make_pair(generateBitPattern(inputs, subset),
-                    make_shared<GenAll<D>>(results, ZeroValue::getInstance())));
+      summary.insert(make_pair(
+          generateBitPattern(inputs, subset),
+          std::make_shared<GenAll<D>>(results, LLVMZeroValue::getInstance())));
     }
     return summary;
   }

@@ -14,11 +14,12 @@
  *      Author: pdschbrt
  */
 
-#ifndef ANALYSIS_IFDS_IDE_EDGEFUNCTIONS_H_
-#define ANALYSIS_IFDS_IDE_EDGEFUNCTIONS_H_
+#ifndef PHASAR_PHASARLLVM_IFDSIDE_EDGEFUNCTIONS_H_
+#define PHASAR_PHASARLLVM_IFDSIDE_EDGEFUNCTIONS_H_
 
 #include <memory>
 #include <phasar/PhasarLLVM/IfdsIde/EdgeFunction.h>
+#include <set>
 
 namespace psr {
 
@@ -34,12 +35,12 @@ public:
   getReturnEdgeFunction(N callSite, M calleeMethod, N exitStmt, D exitNode,
                         N reSite, D retNode) = 0;
   virtual std::shared_ptr<EdgeFunction<V>>
-  getCallToReturnEdgeFunction(N callSite, D callNode, N retSite,
-                              D retSiteNode) = 0;
+  getCallToRetEdgeFunction(N callSite, D callNode, N retSite, D retSiteNode,
+                           std::set<M> callees) = 0;
   virtual std::shared_ptr<EdgeFunction<V>>
   getSummaryEdgeFunction(N curr, D currNode, N succ, D succNode) = 0;
 };
 
 } // namespace psr
 
-#endif /* ANALYSIS_IFDS_IDE_EDGEFUNCTIONS_HH_ */
+#endif

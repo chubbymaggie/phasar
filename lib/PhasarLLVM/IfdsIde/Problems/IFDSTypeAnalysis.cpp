@@ -7,19 +7,17 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Instruction.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/Type.h>
-#include <llvm/IR/Value.h>
 #include <phasar/PhasarLLVM/ControlFlow/LLVMBasedICFG.h>
-#include <phasar/PhasarLLVM/IfdsIde/DefaultSeeds.h>
 #include <phasar/PhasarLLVM/IfdsIde/FlowFunction.h>
 #include <phasar/PhasarLLVM/IfdsIde/LLVMZeroValue.h>
 #include <phasar/PhasarLLVM/IfdsIde/Problems/IFDSTypeAnalysis.h>
+
 #include <phasar/Utils/LLVMShorthands.h>
+#include <phasar/Utils/Logger.h>
+
 using namespace std;
 using namespace psr;
+
 namespace psr {
 
 IFDSTypeAnalysis::IFDSTypeAnalysis(IFDSTypeAnalysis::i_t icfg,
@@ -87,8 +85,8 @@ map<IFDSTypeAnalysis::n_t, set<IFDSTypeAnalysis::d_t>>
 IFDSTypeAnalysis::initialSeeds() {
   map<IFDSTypeAnalysis::n_t, set<IFDSTypeAnalysis::d_t>> SeedMap;
   for (auto &EntryPoint : EntryPoints) {
-    SeedMap.insert(std::make_pair(&icfg.getMethod(EntryPoint)->front().front(),
-                                  set<IFDSTypeAnalysis::d_t>({zeroValue()})));
+    SeedMap.insert(make_pair(&icfg.getMethod(EntryPoint)->front().front(),
+                             set<IFDSTypeAnalysis::d_t>({zeroValue()})));
   }
   return SeedMap;
 }
@@ -101,15 +99,17 @@ bool IFDSTypeAnalysis::isZeroValue(IFDSTypeAnalysis::d_t d) const {
   return isLLVMZeroValue(d);
 }
 
-string IFDSTypeAnalysis::DtoString(IFDSTypeAnalysis::d_t d) const {
-  return llvmIRToString(d);
+void IFDSTypeAnalysis::printNode(ostream &os, IFDSTypeAnalysis::n_t n) const {
+  os << llvmIRToString(n);
 }
 
-string IFDSTypeAnalysis::NtoString(IFDSTypeAnalysis::n_t n) const {
-  return llvmIRToString(n);
+void IFDSTypeAnalysis::printDataFlowFact(ostream &os,
+                                         IFDSTypeAnalysis::d_t d) const {
+  os << llvmIRToString(d);
 }
 
-string IFDSTypeAnalysis::MtoString(IFDSTypeAnalysis::m_t m) const {
-  return m->getName().str();
+void IFDSTypeAnalysis::printMethod(ostream &os, IFDSTypeAnalysis::m_t m) const {
+  os << m->getName().str();
 }
+
 } // namespace psr

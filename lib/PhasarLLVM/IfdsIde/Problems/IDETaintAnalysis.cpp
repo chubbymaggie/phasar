@@ -19,6 +19,8 @@
 #include <phasar/PhasarLLVM/IfdsIde/FlowFunctions/Identity.h>
 #include <phasar/PhasarLLVM/IfdsIde/LLVMZeroValue.h>
 #include <phasar/PhasarLLVM/IfdsIde/Problems/IDETaintAnalysis.h>
+#include <phasar/Utils/LLVMShorthands.h>
+
 using namespace std;
 using namespace psr;
 namespace psr {
@@ -73,8 +75,8 @@ IDETaintAnalysis::initialSeeds() {
   // just start in main()
   map<IDETaintAnalysis::n_t, set<IDETaintAnalysis::d_t>> SeedMap;
   for (auto &EntryPoint : EntryPoints) {
-    SeedMap.insert(std::make_pair(&icfg.getMethod(EntryPoint)->front().front(),
-                                  set<IDETaintAnalysis::d_t>({zeroValue()})));
+    SeedMap.insert(make_pair(&icfg.getMethod(EntryPoint)->front().front(),
+                             set<IDETaintAnalysis::d_t>({zeroValue()})));
   }
   return SeedMap;
 }
@@ -117,9 +119,11 @@ IDETaintAnalysis::getReturnEdgeFunction(IDETaintAnalysis::n_t callSite,
 }
 
 shared_ptr<EdgeFunction<IDETaintAnalysis::v_t>>
-IDETaintAnalysis::getCallToReturnEdgeFunction(
-    IDETaintAnalysis::n_t callSite, IDETaintAnalysis::d_t callNode,
-    IDETaintAnalysis::n_t retSite, IDETaintAnalysis::d_t retSiteNode) {
+IDETaintAnalysis::getCallToRetEdgeFunction(IDETaintAnalysis::n_t callSite,
+                                           IDETaintAnalysis::d_t callNode,
+                                           IDETaintAnalysis::n_t retSite,
+                                           IDETaintAnalysis::d_t retSiteNode,
+                                           set<IDETaintAnalysis::m_t> callees) {
   return EdgeIdentity<IDETaintAnalysis::v_t>::getInstance();
 }
 
@@ -162,25 +166,26 @@ IDETaintAnalysis::IDETainAnalysisAllTop::joinWith(
   return EdgeIdentity<IDETaintAnalysis::v_t>::getInstance();
 }
 
-bool IDETaintAnalysis::IDETainAnalysisAllTop::equalTo(
-    shared_ptr<EdgeFunction<IDETaintAnalysis::v_t>> other) {
+bool IDETaintAnalysis::IDETainAnalysisAllTop::equal_to(
+    shared_ptr<EdgeFunction<IDETaintAnalysis::v_t>> other) const {
   return false;
 }
 
-string IDETaintAnalysis::DtoString(IDETaintAnalysis::d_t d) const {
-  return llvmIRToString(d);
+void IDETaintAnalysis::printNode(ostream &os, IDETaintAnalysis::n_t n) const {
+  os << llvmIRToString(n);
 }
 
-string IDETaintAnalysis::VtoString(IDETaintAnalysis::v_t v) const {
-  return llvmIRToString(v);
+void IDETaintAnalysis::printDataFlowFact(ostream &os,
+                                         IDETaintAnalysis::d_t d) const {
+  os << llvmIRToString(d);
 }
 
-string IDETaintAnalysis::NtoString(IDETaintAnalysis::n_t n) const {
-  return llvmIRToString(n);
+void IDETaintAnalysis::printMethod(ostream &os, IDETaintAnalysis::m_t m) const {
+  os << m->getName().str();
 }
 
-string IDETaintAnalysis::MtoString(IDETaintAnalysis::m_t m) const {
-  return m->getName().str();
+void IDETaintAnalysis::printValue(ostream &os, IDETaintAnalysis::v_t v) const {
+  os << llvmIRToString(v);
 }
 
 } // namespace psr

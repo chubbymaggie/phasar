@@ -14,19 +14,23 @@
  *      Author: pdschbrt
  */
 
-#ifndef ANALYSIS_VTABLE_H_
-#define ANALYSIS_VTABLE_H_
+#ifndef PHASAR_PHASARLLVM_POINTER_VTABLE_H_
+#define PHASAR_PHASARLLVM_POINTER_VTABLE_H_
 
-#include "json.hpp"
-#include <algorithm>
-#include <iostream>
-#include <llvm/IR/Type.h>
+#include <iosfwd>
 #include <string>
 #include <vector>
 
-using json = nlohmann::json;
+#include <json.hpp>
+
+namespace llvm {
+class Module;
+class Type;
+} // namespace llvm
 
 namespace psr {
+
+using json = nlohmann::json;
 
 /**
  * 	@brief Represents a virtual method table.
@@ -40,14 +44,18 @@ private:
 
 public:
   VTable() = default;
-  virtual ~VTable() = default;
+  VTable(const VTable &) = default;
+  VTable &operator=(const VTable &) = default;
+  VTable(VTable &&) = default;
+  VTable &operator=(VTable &&) = default;
+  ~VTable() = default;
 
   /**
    * 	@brief Returns a function identifier by it's index in the VTable.
    * 	@param i Index of the entry.
    * 	@return Function identifier.
    */
-  std::string getFunctionByIdx(unsigned i);
+  std::string getFunctionByIdx(unsigned i) const;
 
   /**
    * 	@brief Returns position index of the given function identifier
@@ -69,16 +77,14 @@ public:
    * 	@brief Checks if the VTable has no entries.
    * 	@return True, if VTable is empty, false otherwise.
    */
-  bool empty();
+  bool empty() const;
+
+  size_t size() const;
+
   std::vector<std::string>::iterator begin();
   std::vector<std::string>::const_iterator begin() const;
   std::vector<std::string>::iterator end();
   std::vector<std::string>::const_iterator end() const;
-  /**
-   * 	@brief Returns the VTable as a std::vector.
-   * 	@return std::vector holding all information of the VTable.
-   */
-  std::vector<std::string> getVTable() const;
 
   /**
    * 	@brief VTable's print operator.
@@ -87,9 +93,9 @@ public:
    */
   friend std::ostream &operator<<(std::ostream &os, const VTable &t);
 
-  json exportPATBCJSON();
+  json getAsJson();
 };
 
 } // namespace psr
 
-#endif /* ANALYSIS_VTABLE_HH_ */
+#endif

@@ -14,22 +14,27 @@
  *      Author: philipp
  */
 
-#ifndef SRC_ANALYSIS_PLUGINS_IFDSTABULATIONPROBLEMPLUGIN_H_
-#define SRC_ANALYSIS_PLUGINS_IFDSTABULATIONPROBLEMPLUGIN_H_
+#ifndef PHASAR_PHASARLLVM_PLUGINS_INTERFACES_IFDSIDE_IFDSTABULATIONPROBLEMPLUGIN_H_
+#define PHASAR_PHASARLLVM_PLUGINS_INTERFACES_IFDSIDE_IFDSTABULATIONPROBLEMPLUGIN_H_
 
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Instruction.h>
-#include <llvm/IR/Value.h>
 #include <map>
 #include <memory>
-#include <phasar/PhasarLLVM/ControlFlow/LLVMBasedICFG.h>
-#include <phasar/PhasarLLVM/IfdsIde/DefaultIFDSTabulationProblem.h>
-#include <phasar/PhasarLLVM/IfdsIde/LLVMZeroValue.h>
-#include <phasar/Utils/LLVMShorthands.h>
 #include <string>
 #include <vector>
 
+#include <phasar/PhasarLLVM/IfdsIde/DefaultIFDSTabulationProblem.h>
+#include <phasar/PhasarLLVM/IfdsIde/LLVMZeroValue.h>
+#include <phasar/Utils/LLVMShorthands.h>
+
+namespace llvm {
+class Function;
+class Instruction;
+class Value;
+} // namespace llvm
+
 namespace psr {
+
+class LLVMBasedICFG;
 
 class IFDSTabulationProblemPlugin
     : public DefaultIFDSTabulationProblem<
@@ -59,16 +64,17 @@ public:
     return isLLVMZeroValue(d);
   }
 
-  std::string DtoString(const llvm::Value *d) const override {
-    return llvmIRToString(d);
+  void printNode(std::ostream &os, const llvm::Instruction *n) const override {
+    os << llvmIRToString(n);
   }
 
-  std::string NtoString(const llvm::Instruction *n) const override {
-    return llvmIRToString(n);
+  void printDataFlowFact(std::ostream &os,
+                         const llvm::Value *d) const override {
+    os << llvmIRToString(d);
   }
 
-  std::string MtoString(const llvm::Function *m) const override {
-    return llvmIRToString(m);
+  void printMethod(std::ostream &os, const llvm::Function *m) const override {
+    os << m->getName().str();
   }
 };
 
@@ -79,4 +85,4 @@ extern std::map<std::string,
 
 } // namespace psr
 
-#endif /* SRC_ANALYSIS_PLUGINS_IFDSTABULATIONPROBLEMPLUGIN_HH_ */
+#endif

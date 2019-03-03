@@ -14,9 +14,33 @@
  *      Author: pdschbrt
  */
 
+#include <thread>
+
+#include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Verifier.h>
+#include <llvm/IRReader/IRReader.h>
+#include <llvm/Support/SourceMgr.h>
+
+#include <cppconn/driver.h>
+#include <cppconn/exception.h>
+#include <cppconn/prepared_statement.h>
+#include <cppconn/resultset.h>
+#include <cppconn/statement.h>
+
 #include <phasar/DB/DBConn.h>
-using namespace std;
+#include <phasar/DB/Hexastore.h>
+#include <phasar/PhasarLLVM/Pointer/VTable.h>
+
+#include <phasar/Utils/IO.h>
+#include <phasar/Utils/LLVMShorthands.h>
+#include <phasar/Utils/Logger.h>
+#include <phasar/Utils/Macros.h>
+
 using namespace psr;
+using namespace std;
 
 namespace psr {
 
@@ -27,7 +51,7 @@ const string DBConn::db_server_address = "tcp://127.0.0.1:3306";
 
 DBConn::DBConn() {
   auto lg = lg::get();
-  BOOST_LOG_SEV(lg, DEBUG) << "Connect to database";
+  LOG_IF_ENABLE(BOOST_LOG_SEV(lg, DEBUG) << "Connect to database");
   try {
     driver = get_driver_instance();
     conn = driver->connect(db_server_address, db_user, db_password);
@@ -45,7 +69,7 @@ DBConn::DBConn() {
 
 DBConn::~DBConn() {
   auto lg = lg::get();
-  BOOST_LOG_SEV(lg, DEBUG) << "Close database connection";
+  LOG_IF_ENABLE(BOOST_LOG_SEV(lg, DEBUG) << "Close database connection");
   delete conn;
 }
 
@@ -482,7 +506,7 @@ bool DBConn::insertVTable(const VTable &VTBL, const string &TypeName,
   try {
     int typeID = getTypeID(TypeName);
     // module ID of the module that contains the current type
-    for (auto fname : VTBL.getVTable()) {
+    for (auto fname : VTBL) {
       // Identify the corresponding function id
       unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
           "SELECT DISTINCT function_id, declaration FROM function "
@@ -587,7 +611,8 @@ unique_ptr<llvm::Module> DBConn::getModule(const string &identifier,
       Mod->setModuleIdentifier(identifier);
       // check if everything has worked-out
       bool broken_debug_info = false;
-      if (llvm::verifyModule(*Mod, &llvm::errs(), &broken_debug_info)) {
+      if (Mod.get() == nullptr ||
+          llvm::verifyModule(*Mod, &llvm::errs(), &broken_debug_info)) {
         cout << "verifying module failed!" << endl;
       }
       if (broken_debug_info) {
@@ -834,7 +859,6 @@ void operator>>(DBConn &db, PointsToGraph &PTG) {
 void DBConn::storeLLVMBasedICFG(const LLVMBasedICFG &ICFG,
                                 const string &ProjectName, bool use_hs) {
   try {
-
   } catch (sql::SQLException &e) {
     SQL_STD_ERROR_HANDLING;
   }
@@ -843,7 +867,6 @@ void DBConn::storeLLVMBasedICFG(const LLVMBasedICFG &ICFG,
 LLVMBasedICFG DBConn::loadLLVMBasedICFGfromModule(const string &ModuleName,
                                                   bool use_hs) {
   try {
-
   } catch (sql::SQLException &e) {
     SQL_STD_ERROR_HANDLING;
   }
@@ -856,7 +879,6 @@ LLVMBasedICFG
 DBConn::loadLLVMBasedICFGfromModules(initializer_list<string> ModuleNames,
                                      bool use_hs) {
   try {
-
   } catch (sql::SQLException &e) {
     SQL_STD_ERROR_HANDLING;
   }
@@ -868,7 +890,6 @@ DBConn::loadLLVMBasedICFGfromModules(initializer_list<string> ModuleNames,
 LLVMBasedICFG DBConn::loadLLVMBasedICFGfromProject(const string &ProjectName,
                                                    bool use_hs) {
   try {
-
   } catch (sql::SQLException &e) {
     SQL_STD_ERROR_HANDLING;
   }
@@ -880,7 +901,6 @@ LLVMBasedICFG DBConn::loadLLVMBasedICFGfromProject(const string &ProjectName,
 void DBConn::storePointsToGraph(const PointsToGraph &PTG,
                                 const string &ProjectName, bool use_hs) {
   try {
-
   } catch (sql::SQLException &e) {
     SQL_STD_ERROR_HANDLING;
   }
@@ -889,7 +909,6 @@ void DBConn::storePointsToGraph(const PointsToGraph &PTG,
 PointsToGraph DBConn::loadPointsToGraphFromFunction(const string &FunctionName,
                                                     bool use_hs) {
   try {
-
   } catch (sql::SQLException &e) {
     SQL_STD_ERROR_HANDLING;
   }
@@ -927,90 +946,93 @@ void DBConn::storeLTHGraphToHex(const LLVMTypeHierarchy::bidigraph_t &G,
 
 void DBConn::storeLLVMTypeHierarchy(LLVMTypeHierarchy &TH,
                                     const string &ProjectName, bool use_hs) {
-  try {
-    // TH contains new information if one of the following is true:
-    // (1) one or more modules are not stored in the database
-    // (2) one or more modules are not listed in the
-    //     module - type_hierarchy relation
-    // If one of the above is true, the TH will be stored and all missing
-    // or new information (e.g. modules, VTables) will be stored as well.
-    bool THContainsNewInformation = false;
-    // Initialize the transaction
-    unique_ptr<sql::Statement> stmt(conn->createStatement());
-    stmt->execute("START TRANSACTION");
-    for (auto M : TH.contained_modules) {
-      // Check if all modules contained in the TH are already stored in the
-      // database. At the same time, all types contained in the modules will
-      // be stored (if not already stored).
-      int moduleID = getModuleID(M->getModuleIdentifier());
-      if (moduleID == -1 || getModuleHash(moduleID) != computeModuleHash(M)) {
-        insertModule(ProjectName, M);
-        THContainsNewInformation = true;
-      } else if (!THContainsNewInformation &&
-                 moduleHasTypeHierarchy(moduleID) == QueryReturnCode::DBFalse) {
-        THContainsNewInformation = true;
-      }
-    }
-    if (THContainsNewInformation) {
-      // Write type hierarchy
-      unique_ptr<sql::PreparedStatement> thpstmt(
-          conn->prepareStatement("INSERT INTO type_hierarchy "
-                                 "(type_hierarchy_id,representation,"
-                                 "representation_ref) VALUES(?,?,?)"));
-      int THID = getNextAvailableID("type_hierarchy");
-      thpstmt->setInt(1, THID);
-      if (use_hs) {
-        // Write type hierarchy graph to hexastore
-        string hex_id("LTH_" + to_string(THID) + "_hex.db");
-        storeLTHGraphToHex(TH.g, hex_id);
-        thpstmt->setNull(2, 0);
-        thpstmt->setString(3, hex_id);
-      } else {
-        // Write type hierarchy graph as dot
-        stringstream sst;
-        TH.printGraphAsDot(sst);
-        sst.flush();
-        cout << sst.str() << endl;
-        thpstmt->setBlob(2, &sst);
-        thpstmt->setNull(3, 0);
-        // Write type hiearchy graph as dot file
-        // ofstream myfile("LTHGraph.dot");
-        // TH.printGraphAsDot(myfile);
-      }
-      thpstmt->executeUpdate();
+  // try {
+  //   // TH contains new information if one of the following is true:
+  //   // (1) one or more modules are not stored in the database
+  //   // (2) one or more modules are not listed in the
+  //   //     module - type_hierarchy relation
+  //   // If one of the above is true, the TH will be stored and all missing
+  //   // or new information (e.g. modules, VTables) will be stored as well.
+  //   bool THContainsNewInformation = false;
+  //   // Initialize the transaction
+  //   unique_ptr<sql::Statement> stmt(conn->createStatement());
+  //   stmt->execute("START TRANSACTION");
+  //   for (auto M : TH.contained_modules) {
+  //     // Check if all modules contained in the TH are already stored in the
+  //     // database. At the same time, all types contained in the modules will
+  //     // be stored (if not already stored).
+  //     int moduleID = getModuleID(M->getModuleIdentifier());
+  //     if (moduleID == -1 || getModuleHash(moduleID) != computeModuleHash(M))
+  //     {
+  //       insertModule(ProjectName, M);
+  //       THContainsNewInformation = true;
+  //     } else if (!THContainsNewInformation &&
+  //                moduleHasTypeHierarchy(moduleID) ==
+  //                QueryReturnCode::DBFalse) {
+  //       THContainsNewInformation = true;
+  //     }
+  //   }
+  //   if (THContainsNewInformation) {
+  //     // Write type hierarchy
+  //     unique_ptr<sql::PreparedStatement> thpstmt(
+  //         conn->prepareStatement("INSERT INTO type_hierarchy "
+  //                                "(type_hierarchy_id,representation,"
+  //                                "representation_ref) VALUES(?,?,?)"));
+  //     int THID = getNextAvailableID("type_hierarchy");
+  //     thpstmt->setInt(1, THID);
+  //     if (use_hs) {
+  //       // Write type hierarchy graph to hexastore
+  //       string hex_id("LTH_" + to_string(THID) + "_hex.db");
+  //       storeLTHGraphToHex(TH.g, hex_id);
+  //       thpstmt->setNull(2, 0);
+  //       thpstmt->setString(3, hex_id);
+  //     } else {
+  //       // Write type hierarchy graph as dot
+  //       stringstream sst;
+  //       TH.printGraphAsDot(sst);
+  //       sst.flush();
+  //       cout << sst.str() << endl;
+  //       thpstmt->setBlob(2, &sst);
+  //       thpstmt->setNull(3, 0);
+  //       // Write type hiearchy graph as dot file
+  //       // ofstream myfile("LTHGraph.dot");
+  //       // TH.printGraphAsDot(myfile);
+  //     }
+  //     thpstmt->executeUpdate();
 
-      // Fill type hierarchy - type relation
-      for (auto type_identifier : TH.recognized_struct_types) {
-        unique_ptr<sql::PreparedStatement> ttpstmt(
-            conn->prepareStatement("INSERT INTO type_hierarchy_has_type "
-                                   "(type_hierarchy_id,type_id) VALUES(?,?)"));
-        int typeID = getTypeID(type_identifier);
-        ttpstmt->setInt(1, THID);
-        ttpstmt->setInt(2, typeID);
-        ttpstmt->executeUpdate();
-      }
+  //     // Fill type hierarchy - type relation
+  //     for (auto type_identifier : TH.recognized_struct_types) {
+  //       unique_ptr<sql::PreparedStatement> ttpstmt(
+  //           conn->prepareStatement("INSERT INTO type_hierarchy_has_type "
+  //                                  "(type_hierarchy_id,type_id)
+  //                                  VALUES(?,?)"));
+  //       int typeID = getTypeID(type_identifier);
+  //       ttpstmt->setInt(1, THID);
+  //       ttpstmt->setInt(2, typeID);
+  //       ttpstmt->executeUpdate();
+  //     }
 
-      // Fill module - type hierarchy relation
-      for (auto M : TH.contained_modules) {
-        unique_ptr<sql::PreparedStatement> mtpstmt(conn->prepareStatement(
-            "INSERT INTO module_has_type_hierarchy "
-            "(module_id,type_hierarchy_id) VALUES(?,?)"));
-        int moduleID = getModuleID(M->getModuleIdentifier());
-        mtpstmt->setInt(1, moduleID);
-        mtpstmt->setInt(2, THID);
-        mtpstmt->executeUpdate();
-      }
+  //     // Fill module - type hierarchy relation
+  //     for (auto M : TH.contained_modules) {
+  //       unique_ptr<sql::PreparedStatement> mtpstmt(conn->prepareStatement(
+  //           "INSERT INTO module_has_type_hierarchy "
+  //           "(module_id,type_hierarchy_id) VALUES(?,?)"));
+  //       int moduleID = getModuleID(M->getModuleIdentifier());
+  //       mtpstmt->setInt(1, moduleID);
+  //       mtpstmt->setInt(2, THID);
+  //       mtpstmt->executeUpdate();
+  //     }
 
-      // Store VTables
-      for (auto entry : TH.vtable_map) {
-        insertVTable(entry.second, entry.first, ProjectName);
-      }
-    }
-    // Perform the commit
-    conn->commit();
-  } catch (sql::SQLException &e) {
-    SQL_STD_ERROR_HANDLING;
-  }
+  //     // Store VTables
+  //     for (auto entry : TH.vtable_map) {
+  //       insertVTable(entry.second, entry.first, ProjectName);
+  //     }
+  //   }
+  //   // Perform the commit
+  //   conn->commit();
+  // } catch (sql::SQLException &e) {
+  //   SQL_STD_ERROR_HANDLING;
+  // }
 }
 
 LLVMTypeHierarchy
@@ -1072,7 +1094,6 @@ LLVMTypeHierarchy
 DBConn::loadLLVMTypeHierarchyFromProject(const string &ProjectName,
                                          bool use_hs) {
   try {
-
   } catch (sql::SQLException &e) {
     SQL_STD_ERROR_HANDLING;
   }
@@ -1081,7 +1102,6 @@ DBConn::loadLLVMTypeHierarchyFromProject(const string &ProjectName,
 
 void DBConn::storeIDESummary(const IDESummary &S) {
   try {
-
   } catch (sql::SQLException &e) {
     SQL_STD_ERROR_HANDLING;
   }
@@ -1090,7 +1110,6 @@ void DBConn::storeIDESummary(const IDESummary &S) {
 IDESummary DBConn::loadIDESummary(const string &FunctionName,
                                   const string &AnalysisName) {
   try {
-
   } catch (sql::SQLException &e) {
     SQL_STD_ERROR_HANDLING;
   }
@@ -1142,7 +1161,7 @@ bool DBConn::schemeExists() {
 
 void DBConn::buildDBScheme() {
   auto lg = lg::get();
-  BOOST_LOG_SEV(lg, DEBUG) << "Building database schema";
+  LOG_IF_ENABLE(BOOST_LOG_SEV(lg, DEBUG) << "Building database schema");
 
   unique_ptr<sql::Statement> stmt(conn->createStatement());
   static const string old_unique_checks(
@@ -1523,7 +1542,7 @@ void DBConn::buildDBScheme() {
 
   static const string unique_checks("SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS; ");
   stmt->execute(unique_checks);
-  BOOST_LOG_SEV(lg, DEBUG) << "Database schema done";
+  LOG_IF_ENABLE(BOOST_LOG_SEV(lg, DEBUG) << "Database schema done");
 }
 
 void DBConn::dropDBAndRebuildScheme() {

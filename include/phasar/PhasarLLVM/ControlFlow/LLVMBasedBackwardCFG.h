@@ -14,54 +14,65 @@
  *      Author: philipp
  */
 
-#ifndef SRC_ANALYSIS_ICFG_LLVMBASEDBACKWARDCFG_H_
-#define SRC_ANALYSIS_ICFG_LLVMBASEDBACKWARDCFG_H_
+#ifndef PHASAR_PHASARLLVM_CONTROLFLOW_LLVMBASEDBACKWARDCFG_H_
+#define PHASAR_PHASARLLVM_CONTROLFLOW_LLVMBASEDBACKWARDCFG_H_
 
-#include <iostream>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Instruction.h>
-#include <llvm/IR/Instructions.h>
-#include <phasar/PhasarLLVM/ControlFlow/CFG.h>
 #include <set>
+#include <string>
 #include <vector>
+
+#include <phasar/PhasarLLVM/ControlFlow/CFG.h>
+#include <phasar/PhasarLLVM/ControlFlow/LLVMBasedCFG.h>
+
+namespace llvm {
+class Function;
+class Instruction;
+} // namespace llvm
 
 namespace psr {
 
 class LLVMBasedBackwardCFG
-    : public CFG<const llvm::Instruction *, const llvm::Function *> {
+    : public virtual CFG<const llvm::Instruction *, const llvm::Function *> {
+private:
+  LLVMBasedCFG ForwardCFG;
+
 public:
-  LLVMBasedBackwardCFG();
+  LLVMBasedBackwardCFG() = default;
 
-  virtual ~LLVMBasedBackwardCFG();
+  virtual ~LLVMBasedBackwardCFG() = default;
 
-  virtual const llvm::Function *
-  getMethodOf(const llvm::Instruction *stmt) override;
+  const llvm::Function *getMethodOf(const llvm::Instruction *stmt) override;
 
-  virtual std::vector<const llvm::Instruction *>
+  std::vector<const llvm::Instruction *>
   getPredsOf(const llvm::Instruction *stmt) override;
 
-  virtual std::vector<const llvm::Instruction *>
+  std::vector<const llvm::Instruction *>
   getSuccsOf(const llvm::Instruction *stmt) override;
 
-  virtual std::vector<
-      std::pair<const llvm::Instruction *, const llvm::Instruction *>>
+  std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
   getAllControlFlowEdges(const llvm::Function *fun) override;
 
-  virtual std::vector<const llvm::Instruction *>
+  std::vector<const llvm::Instruction *>
   getAllInstructionsOf(const llvm::Function *fun) override;
 
-  virtual bool isExitStmt(const llvm::Instruction *stmt) override;
+  bool isExitStmt(const llvm::Instruction *stmt) override;
 
-  virtual bool isStartPoint(const llvm::Instruction *stmt) override;
+  bool isStartPoint(const llvm::Instruction *stmt) override;
 
-  virtual bool isFallThroughSuccessor(const llvm::Instruction *stmt,
-                                      const llvm::Instruction *succ) override;
+  bool isFieldLoad(const llvm::Instruction *stmt) override;
 
-  virtual bool isBranchTarget(const llvm::Instruction *stmt,
+  bool isFieldStore(const llvm::Instruction *stmt) override;
+
+  bool isFallThroughSuccessor(const llvm::Instruction *stmt,
                               const llvm::Instruction *succ) override;
 
-  virtual std::string getMethodName(const llvm::Function *fun) override;
+  bool isBranchTarget(const llvm::Instruction *stmt,
+                      const llvm::Instruction *succ) override;
+
+  std::string getMethodName(const llvm::Function *fun) override;
+
+  std::string getStatementId(const llvm::Instruction *stmt) override;
 };
 } // namespace psr
 
-#endif /* SRC_ANALYSIS_ICFG_LLVMBASEDBACKWARDCFG_HH_ */
+#endif

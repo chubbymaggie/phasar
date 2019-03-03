@@ -7,47 +7,72 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
+#include <algorithm>
+#include <iostream>
+
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Value.h>
+
+#include <phasar/PhasarLLVM/ControlFlow/LLVMBasedCFG.h>
+#include <phasar/Utils/LLVMShorthands.h>
+
 #include <phasar/PhasarLLVM/Mono/Problems/IntraMonoFullConstantPropagation.h>
-using namespace psr;
+
 using namespace std;
+using namespace psr;
 namespace psr {
 
 IntraMonoFullConstantPropagation::IntraMonoFullConstantPropagation(
-    LLVMBasedCFG &Cfg, const llvm::Function *F)
-    : IntraMonotoneProblem<const llvm::Instruction *, DFF,
-                           const llvm::Function *, LLVMBasedCFG &>(Cfg, F) {}
+    LLVMBasedCFG &Cfg, IntraMonoFullConstantPropagation::Method_t F)
+    : IntraMonoProblem<IntraMonoFullConstantPropagation::Node_t,
+                       IntraMonoFullConstantPropagation::Domain_t,
+                       IntraMonoFullConstantPropagation::Method_t,
+                       LLVMBasedCFG &>(Cfg, F) {}
 
-MonoSet<IntraMonoFullConstantPropagation::DFF>
-IntraMonoFullConstantPropagation::join(const MonoSet<DFF> &Lhs,
-                                       const MonoSet<DFF> &Rhs) {
-  MonoSet<IntraMonoFullConstantPropagation::DFF> Result;
+MonoSet<IntraMonoFullConstantPropagation::Domain_t>
+IntraMonoFullConstantPropagation::join(
+    const MonoSet<IntraMonoFullConstantPropagation::Domain_t> &Lhs,
+    const MonoSet<IntraMonoFullConstantPropagation::Domain_t> &Rhs) {
+  MonoSet<IntraMonoFullConstantPropagation::Domain_t> Result;
   set_union(Lhs.begin(), Lhs.end(), Rhs.begin(), Rhs.end(),
             inserter(Result, Result.begin()));
   return Result;
 }
 
-bool IntraMonoFullConstantPropagation::sqSubSetEqual(const MonoSet<DFF> &Lhs,
-                                                     const MonoSet<DFF> &Rhs) {
+bool IntraMonoFullConstantPropagation::sqSubSetEqual(
+    const MonoSet<IntraMonoFullConstantPropagation::Domain_t> &Lhs,
+    const MonoSet<IntraMonoFullConstantPropagation::Domain_t> &Rhs) {
   return includes(Rhs.begin(), Rhs.end(), Lhs.begin(), Lhs.end());
 }
 
-MonoSet<IntraMonoFullConstantPropagation::DFF>
-IntraMonoFullConstantPropagation::flow(const llvm::Instruction *S,
-                                       const MonoSet<DFF> &In) {
-  return MonoSet<IntraMonoFullConstantPropagation::DFF>();
+MonoSet<IntraMonoFullConstantPropagation::Domain_t>
+IntraMonoFullConstantPropagation::flow(
+    IntraMonoFullConstantPropagation::Node_t S,
+    const MonoSet<IntraMonoFullConstantPropagation::Domain_t> &In) {
+  return MonoSet<IntraMonoFullConstantPropagation::Domain_t>();
 }
 
-MonoMap<const llvm::Instruction *,
-        MonoSet<IntraMonoFullConstantPropagation::DFF>>
+MonoMap<IntraMonoFullConstantPropagation::Node_t,
+        MonoSet<IntraMonoFullConstantPropagation::Domain_t>>
 IntraMonoFullConstantPropagation::initialSeeds() {
-  return MonoMap<const llvm::Instruction *,
-                 MonoSet<IntraMonoFullConstantPropagation::DFF>>();
+  return MonoMap<IntraMonoFullConstantPropagation::Node_t,
+                 MonoSet<IntraMonoFullConstantPropagation::Domain_t>>();
 }
 
-string IntraMonoFullConstantPropagation::DtoString(
-    pair<const llvm::Value *, unsigned> d) {
-  string s = "< " + llvmIRToString(d.first);
-  s += ", " + to_string(d.second) + " >";
-  return s;
+void IntraMonoFullConstantPropagation::printNode(
+    ostream &os, IntraMonoFullConstantPropagation::Node_t n) const {
+  os << llvmIRToString(n);
 }
+
+void IntraMonoFullConstantPropagation::printDataFlowFact(
+    ostream &os, IntraMonoFullConstantPropagation::Domain_t d) const {
+  os << "< " + llvmIRToString(d.first) << ", " + to_string(d.second) + " >";
+}
+
+void IntraMonoFullConstantPropagation::printMethod(
+    ostream &os, IntraMonoFullConstantPropagation::Method_t m) const {
+  os << m->getName().str();
+}
+
 } // namespace psr

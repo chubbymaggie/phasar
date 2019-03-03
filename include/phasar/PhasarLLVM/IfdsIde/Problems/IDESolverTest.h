@@ -7,16 +7,16 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
-#ifndef ANALYSIS_IFDS_IDE_PROBLEMS_IDE_SOLVERTEST_H_
-#define ANALYSIS_IFDS_IDE_PROBLEMS_IDE_SOLVERTEST_H_
+#ifndef PHASAR_PHASARLLVM_IFDSIDE_PROBLEMS_IDESOLVERTEST_H_
+#define PHASAR_PHASARLLVM_IFDSIDE_PROBLEMS_IDESOLVERTEST_H_
 
 #include <map>
 #include <memory>
-#include <phasar/PhasarLLVM/IfdsIde/DefaultIDETabulationProblem.h>
 #include <set>
 #include <string>
-#include <utility>
 #include <vector>
+
+#include <phasar/PhasarLLVM/IfdsIde/DefaultIDETabulationProblem.h>
 
 namespace llvm {
 class Instruction;
@@ -87,8 +87,8 @@ public:
                         d_t exitNode, n_t reSite, d_t retNode) override;
 
   std::shared_ptr<EdgeFunction<v_t>>
-  getCallToReturnEdgeFunction(n_t callSite, d_t callNode, n_t retSite,
-                              d_t retSiteNode) override;
+  getCallToRetEdgeFunction(n_t callSite, d_t callNode, n_t retSite,
+                           d_t retSiteNode, std::set<m_t> callees) override;
 
   std::shared_ptr<EdgeFunction<v_t>>
   getSummaryEdgeFunction(n_t callStmt, d_t callNode, n_t retSite,
@@ -113,18 +113,18 @@ public:
     std::shared_ptr<EdgeFunction<v_t>>
     joinWith(std::shared_ptr<EdgeFunction<v_t>> otherFunction) override;
 
-    bool equalTo(std::shared_ptr<EdgeFunction<v_t>> other) override;
+    bool equal_to(std::shared_ptr<EdgeFunction<v_t>> other) const override;
   };
 
-  std::string DtoString(d_t d) const override;
+  void printNode(std::ostream &os, n_t n) const override;
 
-  std::string VtoString(v_t v) const override;
+  void printDataFlowFact(std::ostream &os, d_t d) const override;
 
-  std::string NtoString(n_t n) const override;
+  void printMethod(std::ostream &os, m_t m) const override;
 
-  std::string MtoString(m_t m) const override;
+  void printValue(std::ostream &os, v_t v) const override;
 };
 
 } // namespace psr
 
-#endif /* SRC_ANALYSIS_IFDS_IDE_PROBLEMS_IDE_SOLVER_TEST_IDESOLVERTEST_HH_ */
+#endif

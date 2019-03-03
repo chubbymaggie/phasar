@@ -14,61 +14,177 @@
  *      Author: pdschbrt
  */
 
+#include <algorithm>
+#include <cassert>
+#include <iostream>
+#include <memory>
+
+#include <boost/log/sources/record_ostream.hpp>
+
+#include <boost/graph/depth_first_search.hpp>
+#include <boost/graph/graph_utility.hpp>
+#include <boost/graph/graphviz.hpp>
+#include <boost/graph/transitive_closure.hpp>
+#include <boost/property_map/dynamic_property_map.hpp>
+
+#include <llvm/IR/Constants.h> // llvm::ConstantArray
+#include <llvm/IR/Function.h>
+#include <llvm/IR/InstIterator.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
+
+#include <phasar/DB/ProjectIRDB.h>
 #include <phasar/PhasarLLVM/Pointer/LLVMTypeHierarchy.h>
-using namespace std;
+#include <phasar/Utils/GraphExtensions.h>
+#include <phasar/Utils/Logger.h>
+#include <phasar/Utils/Macros.h>
+#include <phasar/Utils/PAMMMacros.h>
+
 using namespace psr;
+using namespace std;
+
 namespace psr {
 
-LLVMTypeHierarchy::LLVMTypeHierarchy(ProjectIRDB &IRDB) {
-  PAMM_FACTORY;
-  auto &lg = lg::get();
-  BOOST_LOG_SEV(lg, INFO) << "Construct type hierarchy";
-  for (auto M : IRDB.getAllModules()) {
-    analyzeModule(*M);
-    reconstructVTable(*M);
-  }
-  REG_COUNTER_WITH_VALUE("LTH Vertices", getNumOfVertices());
-  REG_COUNTER_WITH_VALUE("LTH Edges", getNumOfEdges());
+using json = LLVMTypeHierarchy::json;
+
+LLVMTypeHierarchy::VertexProperties::VertexProperties(llvm::StructType *Type,
+                                                      std::string TypeName)
+    : llvmtype(Type), name(TypeName) {
+  reachableTypes.insert(TypeName);
 }
 
-void LLVMTypeHierarchy::reconstructVTable(const llvm::Module &M) {
+LLVMTypeHierarchy::LLVMTypeHierarchy(ProjectIRDB &IRDB) {
+  PAMM_GET_INSTANCE;
   auto &lg = lg::get();
-  BOOST_LOG_SEV(lg, DEBUG) << "Reconstruct virtual function table for module: "
-                           << M.getModuleIdentifier();
-  const static string vtable_for = "vtable for ";
+  LOG_IF_ENABLE(BOOST_LOG_SEV(lg, INFO) << "Construct type hierarchy");
+  for (auto M : IRDB.getAllModules()) {
+    buildLLVMTypeHierarchy(*M);
+  }
+  REG_COUNTER("CH Vertices", getNumOfVertices(), PAMM_SEVERITY_LEVEL::Full);
+  REG_COUNTER("CH Edges", getNumOfEdges(), PAMM_SEVERITY_LEVEL::Full);
+}
+
+LLVMTypeHierarchy::LLVMTypeHierarchy(const llvm::Module &M) {
+  PAMM_GET_INSTANCE;
+  auto &lg = lg::get();
+  LOG_IF_ENABLE(BOOST_LOG_SEV(lg, INFO) << "Construct type hierarchy");
+  buildLLVMTypeHierarchy(M);
+  REG_COUNTER("CH Vertices", getNumOfVertices(), PAMM_SEVERITY_LEVEL::Full);
+  REG_COUNTER("CH Edges", getNumOfEdges(), PAMM_SEVERITY_LEVEL::Full);
+}
+
+void LLVMTypeHierarchy::buildLLVMTypeHierarchy(const llvm::Module &M) {
+  // build the hierarchy for the module
+  constructHierarchy(M);
+  // reconstruct all available vtables
+  reconstructVTables(M);
+  // cache the reachable types
+  bidigraph_t tc;
+  boost::transitive_closure(g, tc);
+  for (auto V : boost::make_iterator_range(boost::vertices(g))) {
+    for (auto OE : boost::make_iterator_range(boost::out_edges(V, tc))) {
+      auto Source = boost::source(OE, tc);
+      auto Target = boost::target(OE, tc);
+      g[V].reachableTypes.insert(g[Target].name);
+    }
+  }
+}
+
+void LLVMTypeHierarchy::reconstructVTables(const llvm::Module &M) {
+  auto &lg = lg::get();
+  LOG_IF_ENABLE(BOOST_LOG_SEV(lg, DEBUG)
+                << "Reconstruct virtual function table for module: "
+                << M.getModuleIdentifier());
+  const static string VTableFor = "vtable for";
   llvm::Module &m = const_cast<llvm::Module &>(M);
-  for (auto &global : m.globals()) {
-    string demangled = cxx_demangle(global.getName().str());
+  for (auto &Global : m.globals()) {
+    string DemangledGlobalName = cxx_demangle(Global.getName().str());
     // cxx_demangle returns an empty string if something goes wrong
-    if (demangled == "")
+    if (DemangledGlobalName == "")
       continue;
-    if (llvm::isa<llvm::Constant>(global) &&
-        demangled.find(vtable_for) != demangled.npos) {
-      string struct_name = demangled.erase(0, vtable_for.size());
-      llvm::Constant *initializer =
-          (global.hasInitializer()) ? global.getInitializer() : nullptr;
+    // We don't want to find the global "construction vtable for" so
+    // we force the start of the global demangled name to start with vtable_for
+    // NB: We could also check the mangled name and check that it start with
+    // _ZTV
+    if (llvm::isa<llvm::Constant>(Global) &&
+        DemangledGlobalName.find(VTableFor) == 0) {
+      llvm::Constant *GlobalInitializer =
+          (Global.hasInitializer()) ? Global.getInitializer() : nullptr;
       // ignore 'vtable for __cxxabiv1::__si_class_type_info', also the vtable
       // might be marked as external!
-      if (!initializer)
+      if (!GlobalInitializer)
         continue;
+      // Wrong as clang generate types with a .{n} with n a number for template
+      // instance of a class but the vtable is mangled using the whole type
+      // string struct_name = demangled.erase(0, vtable_for.size());
+      // Better implementation but slow
+      if (Global.user_empty())
+        continue;
+      // The first use return a ConstExpr (GetElementPtr) inside a ConstExpr
+      // (Bitcast) inside a store We need to access directly the store as the
+      // ConstExpr are not linked to a basic bloc and so they can not be
+      // printed, we can not access the function in which they are directly, ...
+      // We use ++user_begin() at the beginning to avoid finding the VTT, which
+      // will currently crash the program
+      if (Global.user_empty()) {
+        throw runtime_error("The vtable " + DemangledGlobalName +
+                            " has no user!");
+      }
+
+      auto Base = Global.user_begin();
+      while (Base != Global.user_end() &&
+             (Base->user_empty() || Base->user_begin()->user_empty() ||
+              llvm::isa<llvm::Constant>(*(Base->user_begin()->user_begin())))) {
+        ++Base;
+      }
+
+      if (Base == Global.user_end()) {
+        continue;
+      }
+
+      // We found a constructor or a destructor
+      auto StoreVtableInst = llvm::dyn_cast<llvm::Instruction>(
+          *(Base->user_begin()->user_begin()));
+      if (StoreVtableInst == nullptr) {
+        throw runtime_error("store_vtable_inst == nullptr");
+      }
+      const auto Function = StoreVtableInst->getFunction();
+      if (Function == nullptr) {
+        throw runtime_error("function found for vtable is a nullptr");
+      }
+
+      if (!Function->arg_size()) {
+        throw runtime_error("function using vtable has no argument");
+      }
+      auto ArgIt = Function->arg_begin();
+      auto ArgTy = stripPointer(ArgIt->getType());
+      auto StructName = ArgTy->getStructName().str();
+      StructName = debasify(StructName);
+      if (!containsType(StructName)) {
+        throw runtime_error(
+            "found a vtable that doesn't have any node in the class hierarchy");
+      }
+      // We can prune the hierarchy graph with the knowledge of the vtable
+      pruneTypeHierarchyWithVtable(Function);
       // check if the vtable is already initialized, then we can skip
-      if (vtable_map.find(struct_name) != vtable_map.end())
+      if (type_vtbl_map.count(StructName))
         continue;
 
-      for (unsigned i = 0; i < initializer->getNumOperands(); ++i) {
-        if (llvm::ConstantArray *constant_array =
+      for (unsigned i = 0; i < GlobalInitializer->getNumOperands(); ++i) {
+        if (llvm::ConstantArray *ConstArray =
                 llvm::dyn_cast<llvm::ConstantArray>(
-                    initializer->getAggregateElement(i))) {
-          for (unsigned j = 0; j < constant_array->getNumOperands(); ++j) {
-            if (llvm::ConstantExpr *constant_expr =
+                    GlobalInitializer->getAggregateElement(i))) {
+          for (unsigned j = 0; j < ConstArray->getNumOperands(); ++j) {
+            if (llvm::ConstantExpr *ConstExpr =
                     llvm::dyn_cast<llvm::ConstantExpr>(
-                        constant_array->getAggregateElement(j))) {
-              if (constant_expr->isCast()) {
-                if (llvm::Constant *cast = llvm::ConstantExpr::getBitCast(
-                        constant_expr, constant_expr->getType())) {
-                  if (llvm::Function *vfunc =
-                          llvm::dyn_cast<llvm::Function>(cast->getOperand(0))) {
-                    vtable_map[struct_name].addEntry(vfunc->getName().str());
+                        ConstArray->getAggregateElement(j))) {
+              if (ConstExpr->isCast()) {
+                if (llvm::Constant *Cast = llvm::ConstantExpr::getBitCast(
+                        ConstExpr, ConstExpr->getType())) {
+                  if (llvm::Function *VirtualFunction =
+                          llvm::dyn_cast<llvm::Function>(Cast->getOperand(0))) {
+                    addVTableEntry(StructName,
+                                   VirtualFunction->getName().str());
                   }
                 }
               }
@@ -80,138 +196,217 @@ void LLVMTypeHierarchy::reconstructVTable(const llvm::Module &M) {
   }
 }
 
-void LLVMTypeHierarchy::analyzeModule(const llvm::Module &M) {
+void LLVMTypeHierarchy::constructHierarchy(const llvm::Module &M) {
   auto &lg = lg::get();
-  BOOST_LOG_SEV(lg, DEBUG) << "Analyse types in module: "
-                           << M.getModuleIdentifier();
+  LOG_IF_ENABLE(BOOST_LOG_SEV(lg, DEBUG)
+                << "Analyse types in module: " << M.getModuleIdentifier());
   // store analyzed module
   contained_modules.insert(&M);
+  // iterate struct types and draw the edges
   auto StructTypes = M.getIdentifiedStructTypes();
   for (auto StructType : StructTypes) {
-    auto struct_type_name = StructType->getName().str();
-
-    // Avoid to have the struct.Myclass.base in the database, as it is not used
+    auto TypeName = StructType->getName().str();
+    // Avoid to have the struct.MyType.base in the database, as it is not used
     // by the code anywhere else than in type declaration for alignement reasons
-    if (struct_type_name.compare(struct_type_name.size() - sizeof(".base") + 1,
-                                 sizeof(".base") - 1, ".base") != 0) {
-      uniformTypeName(struct_type_name);
-
-      // only add a new vertex to the graph if the type is currently unknown!
-      if (recognized_struct_types.find(struct_type_name) ==
-          recognized_struct_types.end()) {
-        type_vertex_map[struct_type_name] = boost::add_vertex(g);
-        g[type_vertex_map[struct_type_name]].llvmtype = StructType;
-        g[type_vertex_map[struct_type_name]].name = StructType->getName().str();
-      }
+    string DebTypeName = psr::debasify(TypeName);
+    // handle special cases where .base actually makes sense
+    if (!M.getTypeByName(DebTypeName)) {
+      DebTypeName = TypeName;
+    }
+    // only add a new vertex to the graph if the type is currently unknown!
+    if (!type_vertex_map.count(DebTypeName)) {
+      auto Vertex = boost::add_vertex(g);
+      type_vertex_map[DebTypeName] = Vertex;
+      auto StructTypePtr = M.getTypeByName(DebTypeName);
+      assert(StructTypePtr && "Module does not contain requested type!");
+      g[Vertex] = VertexProperties(StructTypePtr, DebTypeName);
     }
   }
   // construct the edges between a type and its subtypes
   for (auto StructType : StructTypes) {
-    auto struct_type_name = StructType->getName().str();
-    uniformTypeName(struct_type_name);
-
-    for (auto Subtype : StructType->subtypes()) {
-      if (Subtype->isStructTy()) {
-        llvm::StructType *StructSubType =
-            llvm::dyn_cast<llvm::StructType>(Subtype);
-        auto struct_sub_type_name = StructSubType->getName().str();
-        uniformTypeName(struct_sub_type_name);
-
-        boost::add_edge(type_vertex_map[struct_sub_type_name],
-                        type_vertex_map[struct_type_name], g);
+    auto TypeName = StructType->getName().str();
+    TypeName = psr::debasify(TypeName);
+    for (auto SubType : StructType->subtypes()) {
+      // check if the subtype is a struct
+      if (llvm::StructType *StructSubType =
+              llvm::dyn_cast<llvm::StructType>(SubType)) {
+        auto SubTypeName = StructSubType->getName().str();
+        SubTypeName = debasify(SubTypeName);
+        boost::add_edge(type_vertex_map[SubTypeName], type_vertex_map[TypeName],
+                        g);
       }
     }
   }
-  for_each(StructTypes.begin(), StructTypes.end(),
-           [this](const llvm::StructType *ST) {
-             auto struct_type_name = ST->getName().str();
-             uniformTypeName(struct_type_name);
-
-             recognized_struct_types.insert(struct_type_name);
-           });
 }
 
-void inline LLVMTypeHierarchy::uniformTypeName(std::string &TypeName) const {
-  if (TypeName.compare(0, sizeof("class.") - 1, "class.") == 0)
-    TypeName.erase(0, sizeof("class.") - 1);
-  else if (TypeName.compare(0, sizeof("struct.") - 1, "struct.") == 0)
-    TypeName.erase(0, sizeof("struct.") - 1);
-  else if (TypeName.compare(0, sizeof("struct.") - 1, "struct.") == 0)
-    TypeName.erase(0, sizeof("struct.") - 1);
-
+void LLVMTypeHierarchy::pruneTypeHierarchyWithVtable(
+    const llvm::Function *Constructor) {
+  if (!Constructor) {
+    throw runtime_error("constructor found for vtable is a nullptr");
+  }
+  auto ArgIt = Constructor->arg_begin();
+  if (ArgIt == Constructor->arg_end()) {
+    throw runtime_error("constructor using vtable has no argument");
+  }
+  auto ArgTy = stripPointer(ArgIt->getType());
+  auto TypeName = ArgTy->getStructName().str();
   TypeName = debasify(TypeName);
+  if (!containsType(TypeName)) {
+    throw runtime_error(
+        "found a vtable that doesn't have any node in the class hierarchy");
+  }
+  unsigned i = 0, vtable_pos = 0;
+  set<string> pre_vtable, post_vtable;
+  for (auto I = llvm::inst_begin(Constructor), E = llvm::inst_end(Constructor);
+       I != E; ++I, ++i) {
+    const auto &Inst = *I;
+
+    if (auto store = llvm::dyn_cast<llvm::StoreInst>(&Inst)) {
+      // We got a store instruction, now we are checking if it is a vtable
+      // storage
+      if (auto bitcast_expr =
+              llvm::dyn_cast<llvm::ConstantExpr>(store->getValueOperand())) {
+        if (bitcast_expr->isCast()) {
+          if (auto const_gep = llvm::dyn_cast<llvm::ConstantExpr>(
+                  bitcast_expr->getOperand(0))) {
+            auto gep_as_inst = const_gep->getAsInstruction();
+            if (auto gep =
+                    llvm::dyn_cast<llvm::GetElementPtrInst>(gep_as_inst)) {
+              if (auto vtable = llvm::dyn_cast<llvm::Constant>(
+                      gep->getPointerOperand())) {
+                // We can here assume that we found a vtable
+                vtable_pos = i;
+              }
+            }
+            gep_as_inst->deleteValue();
+          }
+        }
+      }
+    }
+
+    if (auto call_inst = llvm::dyn_cast<llvm::CallInst>(&Inst)) {
+      if (auto called = call_inst->getCalledFunction()) {
+        if (isConstructor(called->getName().str())) {
+          if (auto this_type = called->getFunctionType()->getParamType(0)) {
+            if (auto struct_ty =
+                    llvm::dyn_cast<llvm::StructType>(stripPointer(this_type))) {
+              auto struct_name = debasify(struct_ty->getName().str());
+              if (vtable_pos == 0)
+                pre_vtable.insert(struct_name);
+              else
+                post_vtable.insert(struct_name);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  for (auto post_cons : post_vtable) {
+    if (pre_vtable.find(post_cons) != pre_vtable.end()) {
+      post_vtable.erase(post_cons);
+    }
+  }
+
+  auto u = type_vertex_map[TypeName];
+  for (auto post_ty_name : post_vtable) {
+    auto v = type_vertex_map[post_ty_name];
+    if (boost::edge(v, u, g).second) {
+      boost::remove_edge(v, u, g);
+    }
+  }
 }
 
 set<string> LLVMTypeHierarchy::getTransitivelyReachableTypes(string TypeName) {
-  uniformTypeName(TypeName);
-
-  set<string> reachable_nodes;
-  bidigraph_t tc;
-  boost::transitive_closure(g, tc);
-
-  // get all out edges of queried type
-  typename boost::graph_traits<bidigraph_t>::out_edge_iterator ei, ei_end;
-
-  reachable_nodes.insert(g[type_vertex_map[TypeName]].name);
-  for (tie(ei, ei_end) = boost::out_edges(type_vertex_map[TypeName], tc);
-       ei != ei_end; ++ei) {
-
-    auto source = boost::source(*ei, tc);
-    auto target = boost::target(*ei, tc);
-    reachable_nodes.insert(g[target].name);
-  }
-  return reachable_nodes;
+  TypeName = debasify(TypeName);
+  return g[type_vertex_map[TypeName]].reachableTypes;
 }
 
-string LLVMTypeHierarchy::getVTableEntry(string TypeName, unsigned idx) {
-  uniformTypeName(TypeName);
-
-  auto iter = vtable_map.find(TypeName);
-  if (iter != vtable_map.end()) {
-    return iter->second.getFunctionByIdx(idx);
-  }
-  return "";
+string LLVMTypeHierarchy::getVTableEntry(string TypeName, unsigned idx) const {
+  return getVTable(TypeName).getFunctionByIdx(idx);
 }
 
-VTable LLVMTypeHierarchy::getVTable(string TypeName) {
-  uniformTypeName(TypeName);
-
-  return vtable_map[TypeName];
+VTable LLVMTypeHierarchy::getVTable(string TypeName) const {
+  return type_vtbl_map.at(TypeName);
 }
 
 bool LLVMTypeHierarchy::hasSuperType(string TypeName, string SuperTypeName) {
-  uniformTypeName(TypeName);
-  uniformTypeName(SuperTypeName);
+  return hasSubType(SuperTypeName, TypeName);
+}
 
-  cout << "NOT SUPPORTED YET" << endl;
-  return false;
+size_t LLVMTypeHierarchy::getNumTypes() const { return type_vertex_map.size(); }
+
+size_t LLVMTypeHierarchy::getNumVTableEntries(std::string TypeName) const {
+  return getVTable(TypeName).size();
 }
 
 bool LLVMTypeHierarchy::hasSubType(string TypeName, string SubTypeName) {
-  uniformTypeName(TypeName);
-  uniformTypeName(SubTypeName);
-
-  auto reachable_types = getTransitivelyReachableTypes(TypeName);
-  return reachable_types.find(SubTypeName) != reachable_types.end();
+  TypeName = debasify(TypeName);
+  SubTypeName = debasify(SubTypeName);
+  auto ReachableTypes = getTransitivelyReachableTypes(TypeName);
+  return ReachableTypes.count(SubTypeName);
 }
 
 bool LLVMTypeHierarchy::containsVTable(string TypeName) const {
-  uniformTypeName(TypeName);
-
-  auto iter = vtable_map.find(TypeName);
-  return iter != vtable_map.end();
+  return type_vtbl_map.count(TypeName);
 }
 
-bool LLVMTypeHierarchy::containsType(string TypeName) {
-  uniformTypeName(TypeName);
-
-  return recognized_struct_types.count(TypeName);
+bool LLVMTypeHierarchy::containsType(string TypeName) const {
+  return type_vertex_map.count(debasify(TypeName));
 }
 
-string LLVMTypeHierarchy::getPlainTypename(string TypeName) {
-  // types are named something like: 'struct.MyType' or 'struct.MyType.base'
-  uniformTypeName(TypeName);
-  return TypeName;
+void LLVMTypeHierarchy::addVTableEntry(std::string TypeName,
+                                       std::string FunctionName) {
+  type_vtbl_map[TypeName].addEntry(FunctionName);
+}
+
+const llvm::StructType *LLVMTypeHierarchy::getType(std::string TypeName) const {
+  return g[type_vertex_map.at(TypeName)].llvmtype;
+}
+
+void LLVMTypeHierarchy::mergeWith(LLVMTypeHierarchy &Other) {
+  cout << "LLVMTypeHierarchy::mergeWith()" << endl;
+  boost::copy_graph(Other.g, g); // G += H;
+  // build the contractions
+  vector<pair<vertex_t, vertex_t>> contractions;
+  map<string, vertex_t> observed;
+  for (auto V : boost::make_iterator_range(boost::vertices(g))) {
+    if (observed.find(g[V].name) != observed.end()) {
+      // check which one has the valid pointer and the knowledge of the vtables
+      if (g[V].llvmtype) {
+        contractions.push_back(make_pair(observed[g[V].name], V));
+      } else {
+        contractions.push_back(make_pair(V, observed[g[V].name]));
+      }
+    } else {
+      observed[g[V].name] = V;
+    }
+  }
+  cout << "contractions.size(): " << contractions.size() << '\n';
+  for (auto contraction : contractions) {
+    contract_vertices<bidigraph_t, vertex_t, EdgeProperties>(
+        contraction.first, contraction.second, g);
+  }
+  // merge the vtables
+  type_vtbl_map.insert(Other.type_vtbl_map.begin(), Other.type_vtbl_map.end());
+  // merge the modules analyzed
+  contained_modules.insert(Other.contained_modules.begin(),
+                           Other.contained_modules.end());
+  // reset the vertex mapping
+  type_vertex_map.clear();
+  for (auto V : boost::make_iterator_range(boost::vertices(g))) {
+    type_vertex_map[g[V].name] = V;
+  }
+  // cache the reachable types
+  bidigraph_t tc;
+  boost::transitive_closure(g, tc);
+  for (auto V : boost::make_iterator_range(boost::vertices(g))) {
+    for (auto OE : boost::make_iterator_range(boost::out_edges(V, tc))) {
+      auto Source = boost::source(OE, tc);
+      auto Target = boost::target(OE, tc);
+      g[V].reachableTypes.insert(g[Target].name);
+    }
+  }
 }
 
 void LLVMTypeHierarchy::print() {
@@ -219,12 +414,9 @@ void LLVMTypeHierarchy::print() {
   boost::print_graph(g,
                      boost::get(&LLVMTypeHierarchy::VertexProperties::name, g));
   cout << "\nVTables:\n";
-  if (vtable_map.empty()) {
-    cout << "EMPTY\n";
-  } else {
-    for (auto entry : vtable_map) {
-      cout << entry.first << " contains\n" << entry.second << endl;
-    }
+  for (auto VTable : type_vtbl_map) {
+    cout << VTable.first << '\n';
+    cout << VTable.second << '\n';
   }
 }
 
@@ -258,8 +450,8 @@ void LLVMTypeHierarchy::printTransitiveClosure() {
 
 json LLVMTypeHierarchy::getAsJson() {
   json J;
-  vertex_iterator vi_v, vi_v_end;
-  out_edge_iterator ei, ei_end;
+  vertex_iterator_t vi_v, vi_v_end;
+  out_edge_iterator_t ei, ei_end;
   // iterate all graph vertices
   for (boost::tie(vi_v, vi_v_end) = boost::vertices(g); vi_v != vi_v_end;
        ++vi_v) {

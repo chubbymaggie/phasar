@@ -7,15 +7,13 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
-#ifndef SOL_H_
-#define SOL_H_
+#ifndef PHASAR_UTILS_SOL_H_
+#define PHASAR_UTILS_SOL_H_
 
-#include <dlfcn.h>
-#include <iostream>
-#include <memory>
-#include <phasar/Utils/Logger.h>
 #include <stdexcept>
 #include <string>
+
+#include <dlfcn.h>
 
 namespace psr {
 
@@ -28,8 +26,8 @@ private:
 public:
   SOL(const std::string &path);
   ~SOL();
-  SOL(SOL &&);
-  SOL &operator=(SOL &&);
+  SOL(SOL &&) noexcept;
+  SOL &operator=(SOL &&) noexcept;
   SOL(const SOL &) = delete;
   SOL &operator=(const SOL &) = delete;
   template <typename Signature> auto loadSymbol(const std::string &name) {

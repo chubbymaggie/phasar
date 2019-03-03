@@ -14,25 +14,50 @@
  *      Author: philipp
  */
 
-#ifndef SRC_LIB_LLVMSHORTHANDS_H_
-#define SRC_LIB_LLVMSHORTHANDS_H_
+#ifndef PHASAR_UTILS_LLVMSHORTHANDS_H_
+#define PHASAR_UTILS_LLVMSHORTHANDS_H_
 
-#include <boost/algorithm/string/trim.hpp>
-#include <functional>
-#include <iostream>
-#include <llvm/Bitcode/BitcodeReader.h>
-#include <llvm/Bitcode/BitcodeWriter.h>
-#include <llvm/IR/CallSite.h>
-#include <llvm/IR/DerivedTypes.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/Value.h>
-#include <llvm/Support/raw_ostream.h>
-#include <phasar/Config/Configuration.h>
-#include <phasar/PhasarLLVM/IfdsIde/LLVMZeroValue.h>
+#include <string>
 #include <vector>
 
+namespace llvm {
+class Value;
+class FunctionType;
+class Function;
+class Argument;
+class Instruction;
+class TerminatorInst;
+class StoreInst;
+class Module;
+class StringRef;
+} // namespace llvm
+
 namespace psr {
+/**
+ * @brief Return type of SpecialMemberFunctionType.
+ */
+enum class SpecialMemberFunctionTy {
+  NONE = 0,
+  CTOR,
+  DTOR,
+  CPASSIGNOP,
+  MVASSIGNOP
+};
+
+/**
+ * @brief Hashes a string to an int so that strings can be used in switches.
+ * @note In rare conditions the hash values of two strings can collide.
+ */
+constexpr unsigned int str2int(const char *str, int h);
+
+/**
+ * @brief checks if a function name is the name of a special member function.
+ * @param s Mangled function name.
+ * @return Returns an enum element of SpecialMemberFunctionTy.
+ */
+SpecialMemberFunctionTy specialMemberFunctionType(const std::string &s);
+
+SpecialMemberFunctionTy specialMemberFunctionType(const llvm::StringRef &sr);
 
 /**
  * @brief Checks if the given LLVM Value is a LLVM Function Pointer.
@@ -53,6 +78,9 @@ bool matchesSignature(const llvm::Function *F, const llvm::FunctionType *FType);
 
 /**
  * @brief Returns a string representation of a LLVM Value.
+ * @note Expensive function (between 20 to 550 ms per call)
+ *       avoid to do it often, it can kill the performances (c.f. warning in the
+ * implementation)
  */
 std::string llvmIRToString(const llvm::Value *V);
 
@@ -64,12 +92,23 @@ std::vector<const llvm::Value *>
 globalValuesUsedinFunction(const llvm::Function *F);
 
 /**
- * Only Instructions and GlobalVariables have ID's.
+ * Only Instructions and GlobalVariables have 'real' ID's, i.e. annotated meta
+ * data. Formal arguments will not be annotated with an ID during
+ * ValueAnnotationPass. Instead, a formal arguments ID will look like this:
+ *    <function_name>.<#argument>
+ *
  * @brief Returns the ID of a given LLVM Value.
  * @return Meta data ID as a string or -1, if it's not
- * an Instruction or a GlobalVariable.
+ * an Instruction, GlobalVariable or Argument.
  */
 std::string getMetaDataID(const llvm::Value *V);
+
+/**
+ * @brief Returns position of a formal function argument.
+ * @param Arg LLVM Argument.
+ * @return Position or -1 if argument does not belong to any function.
+ */
+int getFunctionArgumentNr(const llvm::Argument *Arg);
 
 /**
  * The Argument count starts with 0.
@@ -119,11 +158,19 @@ const llvm::StoreInst *getNthStoreInstruction(const llvm::Function *F,
                                               unsigned stoNo);
 
 /**
- * @brief Returns the LLVM Module the given LLVM Value belongs to.
+ * @brief Returns the LLVM Module to which the given LLVM Value belongs to.
  * @param V LLVM Value.
  * @return LLVM Module or nullptr.
  */
 const llvm::Module *getModuleFromVal(const llvm::Value *V);
+
+/**
+ * @brief Returns the name of the LLVM Module to which the given LLVM Value
+ * belongs to.
+ * @param V LLVM Value.
+ * @return Module name or empty string.
+ */
+const std::string getModuleNameFromVal(const llvm::Value *V);
 
 /**
  * @brief Computes a hash value for a given LLVM Module.
@@ -144,4 +191,4 @@ std::size_t computeModuleHash(const llvm::Module *M);
 
 } // namespace psr
 
-#endif /* SRC_LIB_LLVMSHORTHANDS_HH_ */
+#endif

@@ -14,19 +14,20 @@
  *      Author: pdschbrt
  */
 
-#ifndef ANALYSIS_GENERALSTATISTICSPASS_H_
-#define ANALYSIS_GENERALSTATISTICSPASS_H_
+#ifndef PHASAR_PHASARLLVM_PASSES_GENERALSTATISTICSPASS_H_
+#define PHASAR_PHASARLLVM_PASSES_GENERALSTATISTICSPASS_H_
 
-#include <iostream>
-#include <llvm/Analysis/LoopInfo.h>
-#include <llvm/IR/CallSite.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Pass.h>
-#include <llvm/PassSupport.h>
 #include <set>
-#include <string>
-#include <vector>
+
+#include <llvm/Pass.h>
+
+namespace llvm {
+class Type;
+class Value;
+class Instruction;
+class AnalysisUsage;
+class Module;
+} // namespace llvm
 
 namespace psr {
 
@@ -57,15 +58,13 @@ private:
   size_t instructions = 0;
   size_t storeInstructions = 0;
   size_t memIntrinsic = 0;
-  size_t pointers = 0;
+  size_t globalPointers = 0;
   std::set<const llvm::Type *> allocatedTypes;
   std::set<const llvm::Value *> allocaInstrucitons;
   std::set<const llvm::Instruction *> retResInstructions;
 
 public:
-  // TODO What's the ID good for?
   static char ID;
-  // TODO What exactly does the constructor do?
   GeneralStatisticsPass() : llvm::ModulePass(ID) {}
 
   /**
@@ -118,9 +117,9 @@ public:
   size_t getInstructions();
 
   /**
-   * @brief Returns the number of Pointers.
+   * @brief Returns the number of global pointers.
    */
-  size_t getPointers();
+  size_t getGlobalPointers();
 
   /**
    * @brief Returns all possible Types.
@@ -140,4 +139,4 @@ public:
 
 } // namespace psr
 
-#endif /* ANALYSIS_GENERALSTATISTICSPASS_HH_ */
+#endif

@@ -7,8 +7,19 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
+#include <iostream>
+#include <utility>
+
+#include <llvm/IR/Function.h>
+#include <llvm/IR/Instruction.h>
+
+#include <phasar/DB/ProjectIRDB.h>
+
 #include "ICFGTestPlugin.h"
+
+using namespace std;
 using namespace psr;
+
 namespace psr {
 
 __attribute__((constructor)) void init() {
@@ -68,6 +79,16 @@ bool ICFGTestPlugin::isExitStmt(const llvm::Instruction *stmt) {
 }
 
 bool ICFGTestPlugin::isStartPoint(const llvm::Instruction *stmt) {
+  throw logic_error("Not implemented yet!");
+  return false;
+}
+
+bool ICFGTestPlugin::isFieldLoad(const llvm::Instruction *stmt) {
+  throw logic_error("Not implemented yet!");
+  return false;
+}
+
+bool ICFGTestPlugin::isFieldStore(const llvm::Instruction *stmt) {
   throw logic_error("Not implemented yet!");
   return false;
 }

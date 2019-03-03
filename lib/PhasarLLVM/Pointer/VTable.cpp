@@ -14,12 +14,16 @@
  *      Author: pdschbrt
  */
 
+#include <algorithm>
+#include <iostream>
+
 #include <phasar/PhasarLLVM/Pointer/VTable.h>
 using namespace std;
 using namespace psr;
+
 namespace psr {
 
-string VTable::getFunctionByIdx(unsigned i) {
+string VTable::getFunctionByIdx(unsigned i) const {
   if (i < vtbl.size())
     return vtbl[i];
   return "";
@@ -42,11 +46,11 @@ int VTable::getEntryByFunctionName(string fname) const {
   }
 }
 
-vector<string> VTable::getVTable() const { return vtbl; }
+bool VTable::empty() const { return vtbl.empty(); }
 
-bool VTable::empty() { return vtbl.empty(); }
+size_t VTable::size() const { return vtbl.size(); }
 
-json VTable::exportPATBCJSON() {
+json VTable::getAsJson() {
   json j = "{}"_json;
   for (unsigned idx = 0; idx < vtbl.size(); ++idx) {
     j.push_back({to_string(idx), vtbl[idx]});

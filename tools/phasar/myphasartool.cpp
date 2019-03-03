@@ -7,18 +7,24 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
+#include <iostream>
+
+#include <llvm/IR/Value.h>
+
 #include <phasar/DB/ProjectIRDB.h>
 #include <phasar/PhasarLLVM/ControlFlow/LLVMBasedICFG.h>
 #include <phasar/PhasarLLVM/IfdsIde/Problems/IFDSLinearConstantAnalysis.h>
 #include <phasar/PhasarLLVM/IfdsIde/Problems/IDELinearConstantAnalysis.h>
 #include <phasar/PhasarLLVM/IfdsIde/Solver/LLVMIFDSSolver.h>
 #include <phasar/PhasarLLVM/IfdsIde/Solver/LLVMIDESolver.h>
+#include <phasar/PhasarLLVM/Pointer/LLVMTypeHierarchy.h>
 #include <phasar/Utils/Logger.h>
 #include <boost/filesystem/operations.hpp>
-#include <iostream>
 
 namespace bpo = boost::program_options;
 namespace bfs = boost::filesystem;
+
+using namespace std;
 using namespace psr;
 
 int main(int argc, const char **argv) {
@@ -33,7 +39,7 @@ int main(int argc, const char **argv) {
   DB.preprocessIR();
   if (DB.getFunction("main")) {
     LLVMTypeHierarchy H(DB);
-    LLVMBasedICFG I(H, DB, WalkerStrategy::Pointer, ResolveStrategy::OTF,
+    LLVMBasedICFG I(H, DB, CallGraphAnalysisType::OTF,
                     {"main"});
     std::cout << "=== Call graph ===\n";
     I.print();
@@ -44,7 +50,7 @@ int main(int argc, const char **argv) {
     S.solve();
 		// IDE template parametrization test
 		IDELinearConstantAnalysis M(I, {"main"});
-		LLVMIDESolver<const llvm::Value *, int, LLVMBasedICFG &> T(M, true);
+		LLVMIDESolver<const llvm::Value *, int64_t, LLVMBasedICFG &> T(M, true);
 		T.solve();
   } else {
     std::cerr << "error: file does not contain a 'main' function!\n";

@@ -7,10 +7,10 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
-#ifndef DATAFLOWANALYSISTYPE_H_
-#define DATAFLOWANALYSISTYPE_H_
+#ifndef PHASAR_PHASARLLVM_UTILS_DATAFLOWANALYSISTYPE_H_
+#define PHASAR_PHASARLLVM_UTILS_DATAFLOWANALYSISTYPE_H_
 
-#include <iostream>
+#include <iosfwd>
 #include <map>
 #include <string>
 
@@ -27,9 +27,10 @@ enum class DataFlowAnalysisType {
   IFDS_LinearConstantAnalysis,
   IDE_LinearConstantAnalysis,
   IDE_SolverTest,
-  MONO_Intra_FullConstantPropagation,
-  MONO_Intra_SolverTest,
-  MONO_Inter_SolverTest,
+  Intra_Mono_FullConstantPropagation,
+  Intra_Mono_SolverTest,
+  Inter_Mono_SolverTest,
+  Inter_Mono_TaintAnalysis,
   Plugin,
   None
 };

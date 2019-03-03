@@ -7,14 +7,16 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
-#ifndef ANALYSIS_IFDS_IDE_PROBLEMS_IFDS_CONSTANALYSIS_H_
-#define ANALYSIS_IFDS_IDE_PROBLEMS_IFDS_CONSTANALYSIS_H_
+#ifndef PHASAR_PHASARLLVM_IFDSIDE_PROBLEMS_IFDSCONSTANALYSIS_H_
+#define PHASAR_PHASARLLVM_IFDSIDE_PROBLEMS_IFDSCONSTANALYSIS_H_
 
 #include <map>
-#include <phasar/PhasarLLVM/IfdsIde/DefaultIFDSTabulationProblem.h>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
+
+#include <phasar/PhasarLLVM/IfdsIde/DefaultIFDSTabulationProblem.h>
 
 // Forward declaration of types for which we only use its pointer or ref type
 namespace llvm {
@@ -47,12 +49,15 @@ public:
 
 private:
   PointsToGraph &ptg;
+  // Holds all allocated memory locations, including global variables
+  std::set<d_t> AllMemLocs;
   std::vector<std::string> EntryPoints;
-  /// Holds all initialized variables and objects.
+  // Holds all initialized variables and objects.
   std::set<d_t> Initialized;
 
 public:
-  IFDSConstAnalysis(i_t icfg, std::vector<std::string> EntryPoints = {"main"});
+  IFDSConstAnalysis(i_t icfg, std::set<d_t> AllMemLocs,
+                    std::vector<std::string> EntryPoints = {"main"});
 
   virtual ~IFDSConstAnalysis() = default;
 
@@ -93,8 +98,8 @@ public:
    * the corresponding call-to-return flow function (see {@link
    * getCallToRetFlowFunction}).
    *
-   * Call or invoke instructions are handled by mapping actual parameters into
-   * formal parameters, i.e. propagating relevant data-flow facts from the
+   * Call or invoke instructions are handled by mapping actual parameters
+   * into formal parameters, i.e. propagating relevant data-flow facts from the
    * caller into the callee context.
    * @brief Processing call/invoke instructions and llvm memory intrinsic
    * functions.
@@ -153,11 +158,14 @@ public:
 
   bool isZeroValue(d_t d) const override;
 
-  std::string DtoString(d_t d) const override;
+  void printNode(std::ostream &os, n_t n) const override;
 
-  std::string NtoString(n_t n) const override;
+  void printDataFlowFact(std::ostream &os, d_t d) const override;
 
-  std::string MtoString(m_t m) const override;
+  void printMethod(std::ostream &os, m_t m) const override;
+
+  void printIFDSReport(std::ostream &os,
+                       SolverResults<n_t, d_t, BinaryDomain> &SR) override;
 
   /**
    * @note Global Variables are always intialized in llvm IR, and therefore
@@ -218,5 +226,4 @@ public:
 
 } // namespace psr
 
-#endif /* ANALYSIS_IFDS_IDE_PROBLEMS_IFDS_CONST_ANALYSIS_IFDSCONSTANALYSIS_H_  \
-        */
+#endif

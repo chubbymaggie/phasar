@@ -14,21 +14,30 @@
  *      Author: pdschbrt
  */
 
+#include <string>
+
+#include <llvm/Analysis/LoopInfo.h>
+#include <llvm/IR/CallSite.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/IntrinsicInst.h>
+#include <llvm/IR/Module.h>
+#include <llvm/PassSupport.h>
 #include <llvm/Support/raw_os_ostream.h>
+
 #include <phasar/PhasarLLVM/Passes/GeneralStatisticsPass.h>
 #include <phasar/Utils/LLVMShorthands.h>
 #include <phasar/Utils/Logger.h>
 #include <phasar/Utils/Macros.h>
-#include <phasar/Utils/PAMM.h>
+#include <phasar/Utils/PAMMMacros.h>
 
 using namespace std;
 using namespace psr;
+
 namespace psr {
 
 bool GeneralStatisticsPass::runOnModule(llvm::Module &M) {
   auto &lg = lg::get();
-  BOOST_LOG_SEV(lg, INFO) << "Running GeneralStatisticsPass";
+  LOG_IF_ENABLE(BOOST_LOG_SEV(lg, INFO) << "Running GeneralStatisticsPass");
   static const std::set<std::string> mem_allocating_functions = {
       "operator new(unsigned long)", "operator new[](unsigned long)", "malloc",
       "calloc", "realloc"};
@@ -110,7 +119,7 @@ bool GeneralStatisticsPass::runOnModule(llvm::Module &M) {
   // check for global pointers
   for (auto &global : M.globals()) {
     if (global.getType()->isPointerTy()) {
-      ++pointers;
+      ++globalPointers;
     }
     ++globals;
   }
@@ -120,43 +129,48 @@ bool GeneralStatisticsPass::runOnModule(llvm::Module &M) {
 bool GeneralStatisticsPass::doInitialization(llvm::Module &M) { return false; }
 
 bool GeneralStatisticsPass::doFinalization(llvm::Module &M) {
-#ifdef PERFORMANCE_EVA
-  // add moduleID to counter names if performing MWA!
-  // const std::string moduleID = " [" + M.getModuleIdentifier() + "]";
-  // for performance reasons (and out of sheer convenience) we simply initialize
+  // For performance reasons (and out of sheer convenience) we simply initialize
   // the counter with the values of the counter varibles, i.e. PAMM simply
   // holds the results.
-  PAMM &pamm = PAMM::getInstance();
-  pamm.regCounter("GS Functions" /* + moduleID*/, functions);
-  pamm.regCounter("GS Globals" /* + moduleID*/, globals);
-  pamm.regCounter("GS Basic Blocks" /* + moduleID*/, basicblocks);
-  pamm.regCounter("GS Allocation-Sites" /* + moduleID*/, allocationsites);
-  pamm.regCounter("GS Call-Sites" /* + moduleID*/, callsites);
-  pamm.regCounter("GS Pointer Variables" /* + moduleID*/, pointers);
-  pamm.regCounter("GS Instructions" /* + moduleID*/, instructions);
-  pamm.regCounter("GS Store Instructions" /* + moduleID*/, storeInstructions);
-  pamm.regCounter("GS Memory Intrinsics" /* + moduleID*/, memIntrinsic);
-  pamm.regCounter("GS Allocated Types" /* + moduleID*/, allocatedTypes.size());
-  return false;
-#else
-  llvm::outs() << "GeneralStatisticsPass summary for module: '"
-               << M.getName().str() << "'\n";
-  llvm::outs() << "functions: " << functions << "\n";
-  llvm::outs() << "globals: " << globals << "\n";
-  llvm::outs() << "basic blocks: " << basicblocks << "\n";
-  llvm::outs() << "allocation sites: " << allocationsites << "\n";
-  llvm::outs() << "calls-sites: " << callsites << "\n";
-  llvm::outs() << "pointer variables: " << pointers << "\n";
-  llvm::outs() << "instructions: " << instructions << "\n";
-  llvm::outs() << "store instructions: " << storeInstructions << "\n";
-  llvm::outs() << "llvm memory intrinsics: " << memIntrinsic << "\n";
-  llvm::outs() << "allocated types:\n";
-  for (auto type : allocatedTypes) {
-    type->print(llvm::outs());
+  PAMM_GET_INSTANCE;
+  REG_COUNTER("GS Allocation-Sites", allocationsites,
+              PAMM_SEVERITY_LEVEL::Core);
+  REG_COUNTER("GS Instructions", instructions, PAMM_SEVERITY_LEVEL::Core);
+  REG_COUNTER("GS Allocated Types", allocatedTypes.size(),
+              PAMM_SEVERITY_LEVEL::Full);
+  REG_COUNTER("GS Basic Blocks", basicblocks, PAMM_SEVERITY_LEVEL::Full);
+  REG_COUNTER("GS Call-Sites", callsites, PAMM_SEVERITY_LEVEL::Full);
+  REG_COUNTER("GS Functions", functions, PAMM_SEVERITY_LEVEL::Full);
+  REG_COUNTER("GS Globals", globals, PAMM_SEVERITY_LEVEL::Full);
+  REG_COUNTER("GS Global Pointer", globalPointers, PAMM_SEVERITY_LEVEL::Full);
+  REG_COUNTER("GS Memory Intrinsics", memIntrinsic, PAMM_SEVERITY_LEVEL::Full);
+  REG_COUNTER("GS Store Instructions", storeInstructions,
+              PAMM_SEVERITY_LEVEL::Full);
+  // Using the logging guard explicitly since we are printing allocated types
+  // manually
+  if (bl::core::get()->get_logging_enabled()) {
+    auto &lg = lg::get();
+    BOOST_LOG_SEV(lg, INFO) << "GeneralStatisticsPass summary for module: '"
+                            << M.getName().str() << "'\n";
+    BOOST_LOG_SEV(lg, INFO) << "Allocated Types    : " << allocatedTypes.size();
+    BOOST_LOG_SEV(lg, INFO) << "Allocation Sites   : " << allocationsites;
+    BOOST_LOG_SEV(lg, INFO) << "Basic Blocks       : " << basicblocks;
+    BOOST_LOG_SEV(lg, INFO) << "Calls Sites        : " << callsites;
+    BOOST_LOG_SEV(lg, INFO) << "Functions          : " << functions;
+    BOOST_LOG_SEV(lg, INFO) << "Globals            : " << globals;
+    BOOST_LOG_SEV(lg, INFO) << "Global Pointer     : " << globalPointers;
+    BOOST_LOG_SEV(lg, INFO) << "Instructions       : " << instructions;
+    BOOST_LOG_SEV(lg, INFO) << "Memory Intrinsics  : " << memIntrinsic;
+    BOOST_LOG_SEV(lg, INFO) << "Store Instructions : " << storeInstructions;
+    BOOST_LOG_SEV(lg, INFO) << ' ';
+    for (auto type : allocatedTypes) {
+      std::string type_str;
+      llvm::raw_string_ostream rso(type_str);
+      type->print(rso);
+      BOOST_LOG_SEV(lg, INFO) << "  " << rso.str();
+    }
   }
-  llvm::outs() << "\n\n";
   return false;
-#endif
 }
 
 void GeneralStatisticsPass::getAnalysisUsage(llvm::AnalysisUsage &AU) const {
@@ -171,7 +185,7 @@ size_t GeneralStatisticsPass::getFunctioncalls() { return callsites; }
 
 size_t GeneralStatisticsPass::getInstructions() { return instructions; }
 
-size_t GeneralStatisticsPass::getPointers() { return pointers; }
+size_t GeneralStatisticsPass::getGlobalPointers() { return globalPointers; }
 
 set<const llvm::Type *> GeneralStatisticsPass::getAllocatedTypes() {
   return allocatedTypes;

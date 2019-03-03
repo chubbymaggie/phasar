@@ -14,11 +14,12 @@
  *      Author: pdschbrt
  */
 
-#ifndef ANALYSIS_IFDS_IDE_EDGEFUNCTION_H_
-#define ANALYSIS_IFDS_IDE_EDGEFUNCTION_H_
+#ifndef PHASAR_PHASARLLVM_IFDSIDE_EDGEFUNCTION_H_
+#define PHASAR_PHASARLLVM_IFDSIDE_EDGEFUNCTION_H_
 
-#include <iostream>
 #include <memory>
+#include <ostream>
+#include <sstream>
 #include <string>
 
 namespace psr {
@@ -35,13 +36,32 @@ public:
   virtual std::shared_ptr<EdgeFunction<V>>
   joinWith(std::shared_ptr<EdgeFunction<V>> otherFunction) = 0;
 
-  virtual bool equalTo(std::shared_ptr<EdgeFunction<V>> other) = 0;
+  virtual bool equal_to(std::shared_ptr<EdgeFunction<V>> other) const = 0;
 
-  virtual void dump() { std::cout << "edge function\n"; }
+  virtual void print(std::ostream &OS, bool isForDebug = false) const {
+    OS << "EdgeFunction";
+  }
 
-  virtual std::string toString() { return "edge function"; }
+  std::string str() {
+    std::ostringstream oss;
+    print(oss);
+    return oss.str();
+  }
 };
+
+template <typename V>
+static inline bool operator==(const EdgeFunction<V> &F,
+                              const EdgeFunction<V> &G) {
+  return F.equal_to(G);
+}
+
+template <typename V>
+static inline std::ostream &operator<<(std::ostream &OS,
+                                       const EdgeFunction<V> &F) {
+  F.print(OS);
+  return OS;
+}
 
 } // namespace psr
 
-#endif /* ANALYSIS_IFDS_IDE_EDGEFUNCTION_HH_ */
+#endif

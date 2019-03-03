@@ -20,6 +20,10 @@
 #include <phasar/PhasarLLVM/IfdsIde/FlowFunctions/Identity.h>
 #include <phasar/PhasarLLVM/IfdsIde/LLVMZeroValue.h>
 #include <phasar/PhasarLLVM/IfdsIde/Problems/IDESolverTest.h>
+#include <phasar/Utils/LLVMShorthands.h>
+#include <phasar/Utils/Logger.h>
+#include <phasar/Utils/Macros.h>
+
 using namespace std;
 using namespace psr;
 namespace psr {
@@ -71,8 +75,8 @@ map<IDESolverTest::n_t, set<IDESolverTest::d_t>> IDESolverTest::initialSeeds() {
   cout << "IDESolverTest::initialSeeds()\n";
   map<IDESolverTest::n_t, set<IDESolverTest::d_t>> SeedMap;
   for (auto &EntryPoint : EntryPoints) {
-    SeedMap.insert(std::make_pair(&icfg.getMethod(EntryPoint)->front().front(),
-                                  set<IDESolverTest::d_t>({zeroValue()})));
+    SeedMap.insert(make_pair(&icfg.getMethod(EntryPoint)->front().front(),
+                             set<IDESolverTest::d_t>({zeroValue()})));
   }
   return SeedMap;
 }
@@ -117,11 +121,12 @@ IDESolverTest::getReturnEdgeFunction(IDESolverTest::n_t callSite,
 }
 
 shared_ptr<EdgeFunction<IDESolverTest::v_t>>
-IDESolverTest::getCallToReturnEdgeFunction(IDESolverTest::n_t callSite,
-                                           IDESolverTest::d_t callNode,
-                                           IDESolverTest::n_t retSite,
-                                           IDESolverTest::d_t retSiteNode) {
-  cout << "IDESolverTest::getCallToReturnEdgeFunction()\n";
+IDESolverTest::getCallToRetEdgeFunction(IDESolverTest::n_t callSite,
+                                        IDESolverTest::d_t callNode,
+                                        IDESolverTest::n_t retSite,
+                                        IDESolverTest::d_t retSiteNode,
+                                        set<IDESolverTest::m_t> callees) {
+  cout << "IDESolverTest::getCallToRetEdgeFunction()\n";
   return EdgeIdentity<IDESolverTest::v_t>::getInstance();
 }
 
@@ -175,27 +180,26 @@ IDESolverTest::IDESolverTestAllTop::joinWith(
   return EdgeIdentity<IDESolverTest::v_t>::getInstance();
 }
 
-bool IDESolverTest::IDESolverTestAllTop::equalTo(
-    shared_ptr<EdgeFunction<IDESolverTest::v_t>> other) {
+bool IDESolverTest::IDESolverTestAllTop::equal_to(
+    shared_ptr<EdgeFunction<IDESolverTest::v_t>> other) const {
   cout << "IDESolverTest::IDESolverTestAllTop::equalTo()\n";
   return false;
 }
 
-string IDESolverTest::DtoString(IDESolverTest::d_t d) const {
-  return llvmIRToString(d);
+void IDESolverTest::printNode(ostream &os, IDESolverTest::n_t n) const {
+  os << llvmIRToString(n);
 }
 
-string IDESolverTest::VtoString(IDESolverTest::v_t v) const {
-  // return llvmIRToString(v);
-  return "empty V test";
+void IDESolverTest::printDataFlowFact(ostream &os, IDESolverTest::d_t d) const {
+  os << llvmIRToString(d);
 }
 
-string IDESolverTest::NtoString(IDESolverTest::n_t n) const {
-  return llvmIRToString(n);
+void IDESolverTest::printMethod(ostream &os, IDESolverTest::m_t m) const {
+  os << m->getName().str();
 }
 
-string IDESolverTest::MtoString(IDESolverTest::m_t m) const {
-  return m->getName().str();
+void IDESolverTest::printValue(ostream &os, IDESolverTest::v_t v) const {
+  os << "empty V test";
 }
 
 } // namespace psr

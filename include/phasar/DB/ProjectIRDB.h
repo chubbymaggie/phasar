@@ -7,42 +7,28 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
-#ifndef ANALYSIS_ProjectIRDB_H_
-#define ANALYSIS_ProjectIRDB_H_
+#ifndef PHASAR_DB_PROJECTIRDB_H_
+#define PHASAR_DB_PROJECTIRDB_H_
 
-#include <algorithm>
-#include <cassert>
-#include <clang/Basic/Diagnostic.h>
-#include <clang/CodeGen/CodeGenAction.h>
-#include <clang/Frontend/CompilerInstance.h>
-#include <clang/Frontend/CompilerInvocation.h>
-#include <clang/Frontend/TextDiagnosticPrinter.h>
-#include <clang/Tooling/CompilationDatabase.h>
-#include <llvm/Analysis/AliasAnalysis.h>
-#include <llvm/Analysis/BasicAliasAnalysis.h>
-#include <llvm/Analysis/CFLAndersAliasAnalysis.h>
-#include <llvm/Bitcode/BitcodeReader.h>
-#include <llvm/Bitcode/BitcodeWriter.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/LegacyPassManager.h>
-#include <llvm/IR/Module.h>
-#include <llvm/IR/PassManager.h>
-#include <llvm/IR/Verifier.h>
-#include <llvm/IRReader/IRReader.h>
-#include <llvm/Linker/Linker.h>
-#include <llvm/Transforms/Scalar.h>
 #include <map>
 #include <memory>
-#include <phasar/PhasarLLVM/IfdsIde/LLVMZeroValue.h>
-#include <phasar/PhasarLLVM/Passes/GeneralStatisticsPass.h>
-#include <phasar/PhasarLLVM/Passes/ValueAnnotationPass.h>
-#include <phasar/PhasarLLVM/Pointer/PointsToGraph.h>
-#include <phasar/Utils/EnumFlags.h>
-#include <phasar/Utils/LLVMShorthands.h>
-#include <phasar/Utils/PAMM.h>
 #include <set>
 #include <string>
-#include <utility>
+
+#include <clang/Tooling/CompilationDatabase.h>
+
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
+
+#include <phasar/PhasarLLVM/Pointer/PointsToGraph.h>
+
+namespace llvm {
+class Value;
+class Instruction;
+class Type;
+class Function;
+class GlobalVariable;
+} // namespace llvm
 
 namespace psr {
 
@@ -72,12 +58,14 @@ private:
   std::set<const llvm::Value *> alloca_instructions;
   // Stores all return/resume instructions
   std::set<const llvm::Instruction *> ret_res_instructions;
+  // Stores all functions
+  std::set<const llvm::Function *> functions;
   // Contains all contexts for all modules and owns them
   std::map<std::string, std::unique_ptr<llvm::LLVMContext>> contexts;
   // Contains all modules that correspond to a project and owns them
   std::map<std::string, std::unique_ptr<llvm::Module>> modules;
   // Maps function names to the module they are !defined! in
-  std::map<std::string, std::string> functions;
+  std::map<std::string, std::string> functionToModuleMap;
   // Maps globals to the module they are !defined! in
   std::map<std::string, std::string> globals;
   // Maps an id to its corresponding instruction
@@ -101,11 +89,16 @@ public:
   /// projects)
   ProjectIRDB(const clang::tooling::CompilationDatabase &CompileDB,
               enum IRDBOptions Opt);
-  /// Constructs a ProjectIRDB from files wich may have to be compiled to llvm
+  /// Constructs a ProjectIRDB from files which may have to be compiled to llvm
   /// IR
   ProjectIRDB(const std::vector<std::string> &Files,
               std::vector<const char *> CompileArgs, enum IRDBOptions Opt);
   ProjectIRDB(ProjectIRDB &&) = default;
+  ProjectIRDB &operator=(ProjectIRDB &&) = delete;
+
+  ProjectIRDB(ProjectIRDB &) = delete;
+  ProjectIRDB &operator=(const ProjectIRDB &) = delete;
+
   ~ProjectIRDB() = default;
 
   void preprocessIR();
@@ -123,6 +116,13 @@ public:
   std::set<const llvm::Function *> getAllFunctions();
   std::set<const llvm::Instruction *> getRetResInstructions();
   std::set<const llvm::Value *> getAllocaInstructions();
+
+  /**
+   * LLVM's intrinsic global variables are excluded.
+   *
+   * @brief Returns all stack and heap allocations, including global variables.
+   */
+  std::set<const llvm::Value *> getAllMemoryLocations();
   std::set<std::string> getAllSourceFiles();
   std::size_t getNumberOfModules();
   llvm::Module *getModuleDefiningFunction(const std::string &FunctionName);
@@ -137,11 +137,44 @@ public:
   void insertPointsToGraph(const std::string &FunctionName, PointsToGraph *ptg);
   void print();
   void exportPATBCJSON();
+  /**
+   * Allows the (de-)serialization of Instructions, Arguments, GlobalValues and
+   * Operands into unique Hexastore string representation.
+   *
+   * What values can be serialized and what scheme is used?
+   *
+   * 	1. Instructions
+   *
+   * 		<function name>.<id>
+   *
+   * 	2. Formal parameters
+   *
+   *		<function name>.f<arg-no>
+   *
+   *	3. Global variables
+   *
+   *		<global variable name>
+   *
+   *	4. ZeroValue
+   *
+   *		<ZeroValueInternalName>
+   *
+   *	5. Operand of an instruction
+   *
+   *		<function name>.<id>.o.<operand no>
+   *
+   * @brief Creates a unique string representation for any given
+   * llvm::Value.
+   */
   std::string valueToPersistedString(const llvm::Value *V);
+  /**
+   * @brief Convertes the given string back into the llvm::Value it represents.
+   * @return Pointer to the converted llvm::Value.
+   */
   const llvm::Value *persistedStringToValue(const std::string &StringRep);
   std::set<const llvm::Type *> getAllocatedTypes();
 };
 
 } // namespace psr
 
-#endif /* ANALYSIS_ProjectIRDB_HH_ */
+#endif

@@ -14,7 +14,25 @@
  *      Author: philipp
  */
 
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/IR/CallSite.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IR/Value.h>
+#include <llvm/Support/raw_ostream.h>
+
+#include <boost/algorithm/string/trim.hpp>
+
+#include <phasar/PhasarLLVM/IfdsIde/LLVMZeroValue.h>
+
+#include <phasar/Config/Configuration.h>
 #include <phasar/Utils/LLVMShorthands.h>
+#include <phasar/Utils/Macros.h>
+
 using namespace std;
 using namespace psr;
 
@@ -26,13 +44,70 @@ const set<string> HeapAllocationFunctions = {"_Znwm", "_Znam", "malloc",
 
 bool isFunctionPointer(const llvm::Value *V) noexcept {
   if (V) {
-    if (V->getType()->isPointerTy() &&
-        V->getType()->getPointerElementType()->isFunctionTy()) {
-      return true;
-    }
-    return false;
+    return V->getType()->isPointerTy() &&
+           V->getType()->getPointerElementType()->isFunctionTy();
   }
   return false;
+}
+
+SpecialMemberFunctionTy specialMemberFunctionType(const std::string &s) {
+  // test if Codes for Constructors, Destructors or operator= are in string
+  static const std::map<std::string, SpecialMemberFunctionTy> codes{
+      {"C1", SpecialMemberFunctionTy::CTOR},
+      {"C2", SpecialMemberFunctionTy::CTOR},
+      {"C3", SpecialMemberFunctionTy::CTOR},
+      {"D0", SpecialMemberFunctionTy::DTOR},
+      {"D1", SpecialMemberFunctionTy::DTOR},
+      {"D2", SpecialMemberFunctionTy::DTOR},
+      {"aSERKS_", SpecialMemberFunctionTy::CPASSIGNOP},
+      {"aSEOS_", SpecialMemberFunctionTy::MVASSIGNOP}};
+  std::vector<std::pair<std::size_t, SpecialMemberFunctionTy>> found;
+  std::size_t blacklist = 0;
+  auto it = codes.begin();
+  while (it != codes.end()) {
+    if (std::size_t index = s.find(it->first, blacklist)) {
+      if (index != std::string::npos) {
+        found.push_back(std::make_pair(index, it->second));
+        blacklist = index + 1;
+      } else {
+        ++it;
+        blacklist = 0;
+      }
+    }
+  }
+  if (found.empty()) {
+    return SpecialMemberFunctionTy::NONE;
+  }
+
+  // test if codes are in function name or type information
+  bool noName = true;
+  for (auto index : found) {
+    for (auto c = s.begin(); c < s.begin() + index.first; ++c) {
+      if (isdigit(*c)) {
+        short i = 0;
+        while (isdigit(*(c + i))) {
+          ++i;
+        }
+        std::string st(c, c + i);
+        if (index.first <= std::distance(s.begin(), c) + atoi(st.c_str())) {
+          noName = false;
+          break;
+        } else {
+          c = c + *c;
+        }
+      }
+    }
+    if (noName) {
+      return index.second;
+    } else {
+      noName = true;
+    }
+  }
+  return SpecialMemberFunctionTy::NONE;
+}
+
+SpecialMemberFunctionTy specialMemberFunctionType(const llvm::StringRef &sr) {
+  return specialMemberFunctionType(sr.str());
 }
 
 bool isAllocaInstOrHeapAllocaFunction(const llvm::Value *V) noexcept {
@@ -53,6 +128,8 @@ bool isAllocaInstOrHeapAllocaFunction(const llvm::Value *V) noexcept {
 bool matchesSignature(const llvm::Function *F,
                       const llvm::FunctionType *FType) {
   // FType->print(llvm::outs());
+  if (F == nullptr || FType == nullptr)
+    return false;
   if (F->arg_size() == FType->getNumParams() &&
       F->getReturnType() == FType->getReturnType()) {
     unsigned i = 0;
@@ -68,15 +145,14 @@ bool matchesSignature(const llvm::Function *F,
 }
 
 std::string llvmIRToString(const llvm::Value *V) {
+  // WARNING: Expensive function, cause is the V->print(RSO)
+  //         (20ms on a medium size code (phasar without debug)
+  //          80ms on a huge size code (clang without debug),
+  //          can be multiplied by times 3 to 5 if passes are enabled)
   std::string IRBuffer;
   llvm::raw_string_ostream RSO(IRBuffer);
   V->print(RSO);
-  if (auto Inst = llvm::dyn_cast<llvm::Instruction>(V)) {
-    RSO << ", ID: " << getMetaDataID(Inst);
-  }
-  if (auto GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-    RSO << ", ID: " << getMetaDataID(GV);
-  }
+  RSO << ", ID: " << getMetaDataID(V);
   RSO.flush();
   boost::trim_left(IRBuffer);
   return IRBuffer;
@@ -99,20 +175,38 @@ globalValuesUsedinFunction(const llvm::Function *F) {
 }
 
 std::string getMetaDataID(const llvm::Value *V) {
-  if (auto I = llvm::dyn_cast<llvm::Instruction>(V)) {
-    return llvm::cast<llvm::MDString>(
-               I->getMetadata(MetaDataKind)->getOperand(0))
-        ->getString()
-        .str();
-  } else if (auto GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
-    if (!isLLVMZeroValue(V)) {
-      return llvm::cast<llvm::MDString>(
-                 GV->getMetadata(MetaDataKind)->getOperand(0))
+  if (auto Inst = llvm::dyn_cast<llvm::Instruction>(V)) {
+    if (auto metaData = Inst->getMetadata(MetaDataKind)) {
+      return llvm::cast<llvm::MDString>(metaData->getOperand(0))
           ->getString()
           .str();
     }
+
+  } else if (auto GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
+    if (!isLLVMZeroValue(V)) {
+      if (auto metaData = GV->getMetadata(MetaDataKind)) {
+        return llvm::cast<llvm::MDString>(metaData->getOperand(0))
+            ->getString()
+            .str();
+      }
+    }
+  } else if (auto *Arg = llvm::dyn_cast<llvm::Argument>(V)) {
+    string FName = Arg->getParent()->getName().str();
+    string ArgNr = to_string(getFunctionArgumentNr(Arg));
+    return string(FName + "." + ArgNr);
   }
   return "-1";
+}
+
+int getFunctionArgumentNr(const llvm::Argument *Arg) {
+  int ArgNr = 0;
+  for (auto &A : Arg->getParent()->args()) {
+    if (&A == Arg) {
+      return ArgNr;
+    }
+    ++ArgNr;
+  }
+  return -1;
 }
 
 const llvm::Argument *getNthFunctionArgument(const llvm::Function *F,
@@ -166,6 +260,11 @@ const llvm::Module *getModuleFromVal(const llvm::Value *V) {
     return nullptr;
   }
   return nullptr;
+}
+
+const std::string getModuleNameFromVal(const llvm::Value *V) {
+  const llvm::Module *M = getModuleFromVal(V);
+  return M ? M->getModuleIdentifier() : " ";
 }
 
 std::size_t computeModuleHash(llvm::Module *M, bool considerIdentifier) {

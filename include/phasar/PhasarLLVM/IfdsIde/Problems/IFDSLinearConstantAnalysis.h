@@ -7,16 +7,16 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
-#ifndef ANALYSIS_IFDS_IDE_PROBLEMS_IFDS_LINEARCONSTANTANALYSIS_H_
-#define ANALYSIS_IFDS_IDE_PROBLEMS_IFDS_LINEARCONSTANTANALYSIS_H_
+#ifndef PHASAR_PHASARLLVM_IFDSIDE_PROBLEMS_IFDSLINEARCONSTANTANALYSIS_H_
+#define PHASAR_PHASARLLVM_IFDSIDE_PROBLEMS_IFDSLINEARCONSTANTANALYSIS_H_
 
-#include <functional>
 #include <map>
-#include <phasar/PhasarLLVM/IfdsIde/DefaultIFDSTabulationProblem.h>
+#include <memory>
 #include <set>
 #include <string>
-#include <utility>
 #include <vector>
+
+#include <phasar/PhasarLLVM/IfdsIde/DefaultIFDSTabulationProblem.h>
 
 // Forward declaration of types for which we only use its pointer or ref type
 namespace llvm {
@@ -35,12 +35,13 @@ struct LCAPair {
   LCAPair();
   LCAPair(const llvm::Value *V, int i);
   friend bool operator==(const LCAPair &lhs, const LCAPair &rhs);
+  friend bool operator!=(const LCAPair &lhs, const LCAPair &rhs);
   friend bool operator<(const LCAPair &lhs, const LCAPair &rhs);
 };
 
 } // namespace psr
 
-// Specialize std::hash to be used in containers like std::unordered_map
+// Specialize hash to be used in containers like std::unordered_map
 namespace std {
 template <> struct hash<psr::LCAPair> {
   std::size_t operator()(const psr::LCAPair &k) const;
@@ -91,14 +92,13 @@ public:
 
   bool isZeroValue(d_t d) const override;
 
-  std::string DtoString(d_t d) const override;
+  void printNode(std::ostream &os, n_t n) const override;
 
-  std::string NtoString(n_t n) const override;
+  void printDataFlowFact(std::ostream &os, d_t d) const override;
 
-  std::string MtoString(m_t m) const override;
+  void printMethod(std::ostream &os, m_t m) const override;
 };
 
 } // namespace psr
 
-#endif /* ANALYSIS_IFDS_IDE_PROBLEMS_IFDS_TAINT_ANALYSIS_IFDSTAINTANALYSIS_HH_ \
-        */
+#endif

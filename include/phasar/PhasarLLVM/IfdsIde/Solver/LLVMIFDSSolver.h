@@ -14,18 +14,22 @@
  *      Author: pdschbrt
  */
 
-#ifndef ANALYSIS_IFDS_IDE_SOLVER_LLVMIFDSSOLVER_H_
-#define ANALYSIS_IFDS_IDE_SOLVER_LLVMIFDSSOLVER_H_
+#ifndef PHASAR_PHASARLLVM_IFDSIDE_SOLVER_LLVMIFDSSOLVER_H_
+#define PHASAR_PHASARLLVM_IFDSIDE_SOLVER_LLVMIFDSSOLVER_H_
 
 #include <algorithm>
+#include <map>
+#include <string>
+
 #include <curl/curl.h>
 #include <json.hpp>
-#include <map>
+
 #include <phasar/PhasarLLVM/ControlFlow/ICFG.h>
 #include <phasar/PhasarLLVM/IfdsIde/IFDSTabulationProblem.h>
 #include <phasar/PhasarLLVM/IfdsIde/Solver/IFDSSolver.h>
+#include <phasar/PhasarLLVM/IfdsIde/Solver/SolverResults.h>
+#include <phasar/Utils/PAMMMacros.h>
 #include <phasar/Utils/Table.h>
-#include <string>
 
 using json = nlohmann::json;
 
@@ -35,32 +39,44 @@ template <typename D, typename I>
 class LLVMIFDSSolver : public IFDSSolver<const llvm::Instruction *, D,
                                          const llvm::Function *, I> {
 private:
-  const bool DUMP_RESULTS;
   IFDSTabulationProblem<const llvm::Instruction *, D, const llvm::Function *, I>
       &Problem;
+  const bool DUMP_RESULTS;
+  const bool PRINT_REPORT;
 
 public:
   virtual ~LLVMIFDSSolver() = default;
 
   LLVMIFDSSolver(IFDSTabulationProblem<const llvm::Instruction *, D,
                                        const llvm::Function *, I> &problem,
-                 bool dumpResults = false)
+                 bool dumpResults = false, bool printReport = true)
       : IFDSSolver<const llvm::Instruction *, D, const llvm::Function *, I>(
             problem),
-        DUMP_RESULTS(dumpResults), Problem(problem) {}
+        Problem(problem), DUMP_RESULTS(dumpResults), PRINT_REPORT(printReport) {
+  }
 
   virtual void solve() override {
     // Solve the analaysis problem
     IFDSSolver<const llvm::Instruction *, D, const llvm::Function *,
                I>::solve();
     bl::core::get()->flush();
-    if (DUMP_RESULTS)
+    if (DUMP_RESULTS) {
       dumpResults();
+    }
+    if (PRINT_REPORT) {
+      printReport();
+    }
+  }
+
+  void printReport() {
+    SolverResults<const llvm::Instruction *, D, BinaryDomain> SR(
+        this->valtab, Problem.zeroValue());
+    Problem.printIFDSReport(std::cout, SR);
   }
 
   void dumpResults() {
-    PAMM_FACTORY;
-    START_TIMER("DFA Result Dumping");
+    PAMM_GET_INSTANCE;
+    START_TIMER("DFA IFDS Result Dumping", PAMM_SEVERITY_LEVEL::Full);
     std::cout << "### DUMP LLVMIFDSSolver results\n";
     auto results = this->valtab.cellSet();
     if (results.empty()) {
@@ -95,7 +111,8 @@ public:
                   << "\tV:  " << cells[i].v << "\n";
       }
     }
-    STOP_TIMER("DFA Result Dumping");
+    std::cout << '\n';
+    STOP_TIMER("DFA IFDS Result Dumping", PAMM_SEVERITY_LEVEL::Full);
   }
 
   json getJsonRepresentationForInstructionNode(const llvm::Instruction *node) {
@@ -141,7 +158,7 @@ public:
     json jsonNode;
 
     if (it == instruction_id_map->end()) {
-      std::cout << "adding new element to map " << std::endl;
+      std::cout << "adding new element to std::map " << std::endl;
 
       jsonNode = getJsonRepresentationForInstructionNode(node);
 
@@ -149,7 +166,8 @@ public:
       instruction_id_map->insert(
           std::pair<const llvm::Instruction *, int>(node, node_number));
     } else {
-      std::cout << "found element in map(inter): " << it->second << std::endl;
+      std::cout << "found element in std::map(inter): " << it->second
+                << std::endl;
     }
     return jsonNode;
   }
@@ -158,25 +176,17 @@ public:
       const llvm::Function *callerFunction,
       std::map<const llvm::Instruction *, int> *instruction_id_map) {
     // In the next line we obtain the corresponding row map which maps (given a
-    // source node)
-    // the target node to the data flow fact map<D, set<D>. In the data flow
-    // fact map D is
-    // a fact F which holds at the source node whereas set<D> contains the facts
-    // that are
-    // produced by F and hold at statement TargetNode.
-    // Usually every node has one successor node, that is why the row map
-    // obtained by row usually
-    // only contains just a single entry. BUT: in case of branch statements and
-    // other advanced
-    // instructions, one statement sometimes has multiple successor statments.
-    // In these cases
-    // the row map contains entries for every single successor statement. After
-    // having obtained
-    // the pairs <SourceNode, TargetNode> the data flow map can be obtained
-    // easily.
-    // size_t from = getJsonRepresentationForInstructionNode(document,
-    // currentNode);
-
+    // source node) the target node to the data flow fact map<D, set<D>. In the
+    // data flow fact map D is a fact F which holds at the source node whereas
+    // set<D> contains the facts that are produced by F and hold at statement
+    // TargetNode. Usually every node has one successor node, that is why the
+    // row map obtained by row usually only contains just a single entry. BUT:
+    // in case of branch statements and other advanced instructions, one
+    // statement sometimes has multiple successor statments. In these cases the
+    // row map contains entries for every single successor statement. After
+    // having obtained the pairs <SourceNode, TargetNode> the data flow map can
+    // be obtained easily. size_t from =
+    // getJsonRepresentationForInstructionNode(document, currentNode);
     json fromNode = getJsonOfNode(currentNode, instruction_id_map);
 
     auto TargetNodeMap = this->computedIntraPathEdges.row(currentNode);
@@ -185,7 +195,7 @@ public:
     std::cout << "TARGET NODE(S)\n";
     for (auto entry : TargetNodeMap) {
       auto TargetNode = entry.first;
-      // use map to store key value and match node to json id
+      // use std::map to store key value and match node to json id
       json toNode = getJsonOfNode(TargetNode, instruction_id_map);
       std::cout << "node pointer target : " << TargetNode << std::endl;
 
@@ -414,4 +424,4 @@ public:
 };
 } // namespace psr
 
-#endif /* ANALYSIS_IFDS_IDE_SOLVER_LLVMIFDSSOLVER_HH_ */
+#endif
